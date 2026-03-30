@@ -5,6 +5,7 @@ use ravif::{BitDepth, EncodedImage, Encoder, RGBA8};
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Parser)]
 #[command(about = "Convert camera RAW files to AVIF")]
@@ -52,8 +53,15 @@ fn encode_avif(img: ImgVec<RGBA8>, quality: f32, speed: u8) -> Result<Vec<u8>> {
     Ok(avif_file)
 }
 
-fn process_file(path: &PathBuf, quality: f32, speed: u8) -> Result<()> {
+fn process_file(
+    path: &PathBuf,
+    quality: f32,
+    speed: u8,
+    done: &AtomicUsize,
+    total: usize,
+) -> Result<()> {
     let out_path = path.with_extension("avif");
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
 
     let img = decode_raw(path).with_context(|| format!("Failed to decode {}", path.display()))?;
     let avif_data = encode_avif(img, quality, speed)?;
@@ -61,21 +69,19 @@ fn process_file(path: &PathBuf, quality: f32, speed: u8) -> Result<()> {
     fs::write(&out_path, &avif_data)
         .with_context(|| format!("Failed to write {}", out_path.display()))?;
 
-    println!(
-        "{} → {} ({}KB)",
-        path.display(),
-        out_path.display(),
-        avif_data.len() / 1024
-    );
+    let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+    println!("[{n}/{total}] {name} → {}KB", avif_data.len() / 1024);
     Ok(())
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let total = args.files.len();
+    let done = AtomicUsize::new(0);
 
     args.files
         .par_iter()
-        .try_for_each(|path| process_file(path, args.quality, args.speed))?;
+        .try_for_each(|path| process_file(path, args.quality, args.speed, &done, total))?;
 
     Ok(())
 }
