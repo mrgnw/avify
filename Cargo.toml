@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 imagepipe = "0.5"
+image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff", "gif"] }
 ravif = "0.13"
 imgref = "1"
 rgb = "0.8"
