@@ -7,7 +7,6 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
 
 #[derive(Parser)]
 #[command(about = "Convert images to AVIF (supports RAW + standard formats)")]
@@ -36,7 +35,7 @@ struct Args {
 enum Status {
     Pending,
     Processing,
-    Done(usize),
+    Done { orig_bytes: u64, avif_bytes: usize },
     Failed(String),
 }
 
@@ -87,8 +86,9 @@ impl Progress {
                     write!(out, "\x1b[2K[{n}/{total}] {} →\n", self.names[i]).ok();
                     lines += 1;
                 }
-                Status::Done(kb) => {
+                Status::Done { avif_bytes, .. } => {
                     let n = i + 1;
+                    let kb = avif_bytes / 1024;
                     write!(out, "\x1b[2K[{n}/{total}] {} → {kb}KB\n", self.names[i]).ok();
                     lines += 1;
                 }
@@ -225,9 +225,17 @@ fn process_file(
             .with_context(|| format!("Failed to move {} → {}", path.display(), dest.display()))?;
     }
 
+    let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
     {
         let mut p = progress.lock().unwrap();
-        p.set(idx, Status::Done(avif_data.len() / 1024));
+        p.set(
+            idx,
+            Status::Done {
+                orig_bytes,
+                avif_bytes: avif_data.len(),
+            },
+        );
         p.render();
     }
 
@@ -246,40 +254,64 @@ fn main() -> Result<()> {
 
     let progress = Mutex::new(Progress::new(&args.files));
 
-    // Render loop in background to show spinner-like updates
-    let progress_ref = &progress;
-    let done = std::sync::atomic::AtomicBool::new(false);
-    let done_ref = &done;
-
-    std::thread::scope(|s| {
-        s.spawn(|| {
-            while !done_ref.load(std::sync::atomic::Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(100));
-                progress_ref.lock().unwrap().render();
-            }
+    let result: Result<()> = args
+        .files
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(idx, path)| {
+            process_file(
+                idx,
+                path,
+                args.quality,
+                args.speed,
+                args.outdir.as_deref(),
+                args.move_originals.as_deref(),
+                &progress,
+            )
         });
 
-        let result: Result<()> = args
-            .files
-            .par_iter()
-            .enumerate()
-            .try_for_each(|(idx, path)| {
-                process_file(
-                    idx,
-                    path,
-                    args.quality,
-                    args.speed,
-                    args.outdir.as_deref(),
-                    args.move_originals.as_deref(),
-                    progress_ref,
+    {
+        let p = progress.lock().unwrap();
+        // Don't re-render, just print summary
+        let (mut orig_total, mut avif_total, mut count) = (0u64, 0u64, 0u64);
+        for status in &p.statuses {
+            if let Status::Done {
+                orig_bytes,
+                avif_bytes,
+            } = status
+            {
+                orig_total += orig_bytes;
+                avif_total += *avif_bytes as u64;
+                count += 1;
+            }
+        }
+        drop(p);
+
+        if count > 0 && orig_total > 0 {
+            let saved = orig_total.saturating_sub(avif_total);
+            let pct = saved * 100 / orig_total;
+            let mut out = io::stderr().lock();
+            if orig_total > 1_048_576 {
+                write!(
+                    out,
+                    "{count} files: {:.1}MB → {:.1}MB (saved {:.1}MB, {pct}%)\n",
+                    orig_total as f64 / 1_048_576.0,
+                    avif_total as f64 / 1_048_576.0,
+                    saved as f64 / 1_048_576.0,
                 )
-            });
+                .ok();
+            } else {
+                write!(
+                    out,
+                    "{count} files: {}KB → {}KB (saved {}KB, {pct}%)\n",
+                    orig_total / 1024,
+                    avif_total / 1024,
+                    saved / 1024,
+                )
+                .ok();
+            }
+        }
+    }
 
-        done.store(true, std::sync::atomic::Ordering::Relaxed);
-
-        // Final render
-        progress.lock().unwrap().render();
-
-        result
-    })
+    result
 }
