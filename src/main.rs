@@ -4,8 +4,10 @@ use imgref::ImgVec;
 use ravif::{BitDepth, EncodedImage, Encoder, RGBA8};
 use rayon::prelude::*;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(about = "Convert images to AVIF (supports RAW + standard formats)")]
@@ -28,6 +30,79 @@ struct Args {
 
     #[arg(required = true)]
     files: Vec<PathBuf>,
+}
+
+#[derive(Clone)]
+enum Status {
+    Pending,
+    Processing,
+    Done(usize),
+    Failed(String),
+}
+
+struct Progress {
+    names: Vec<String>,
+    statuses: Vec<Status>,
+    rendered_lines: usize,
+}
+
+impl Progress {
+    fn new(files: &[PathBuf]) -> Self {
+        let names = files
+            .iter()
+            .map(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        let statuses = vec![Status::Pending; files.len()];
+        Self {
+            names,
+            statuses,
+            rendered_lines: 0,
+        }
+    }
+
+    fn set(&mut self, idx: usize, status: Status) {
+        self.statuses[idx] = status;
+    }
+
+    fn render(&mut self) {
+        let total = self.statuses.len();
+        let mut out = io::stderr().lock();
+
+        // Move cursor up to redraw existing lines
+        if self.rendered_lines > 0 {
+            write!(out, "\x1b[{}A", self.rendered_lines).ok();
+        }
+
+        let mut lines = 0;
+        for (i, status) in self.statuses.iter().enumerate() {
+            match status {
+                Status::Pending => continue,
+                Status::Processing => {
+                    let n = i + 1;
+                    write!(out, "\x1b[2K[{n}/{total}] {} →\n", self.names[i]).ok();
+                    lines += 1;
+                }
+                Status::Done(kb) => {
+                    let n = i + 1;
+                    write!(out, "\x1b[2K[{n}/{total}] {} → {kb}KB\n", self.names[i]).ok();
+                    lines += 1;
+                }
+                Status::Failed(e) => {
+                    let n = i + 1;
+                    write!(out, "\x1b[2K[{n}/{total}] {} FAIL: {e}\n", self.names[i]).ok();
+                    lines += 1;
+                }
+            }
+        }
+
+        self.rendered_lines = lines;
+        out.flush().ok();
+    }
 }
 
 fn is_raw(path: &Path) -> bool {
@@ -101,28 +176,43 @@ fn encode_avif(img: ImgVec<RGBA8>, quality: f32, speed: u8) -> Result<Vec<u8>> {
 }
 
 fn process_file(
+    idx: usize,
     path: &PathBuf,
     quality: f32,
     speed: u8,
     outdir: Option<&Path>,
     move_originals: Option<&Path>,
-    done: &AtomicUsize,
-    total: usize,
+    progress: &Mutex<Progress>,
 ) -> Result<()> {
+    {
+        let mut p = progress.lock().unwrap();
+        p.set(idx, Status::Processing);
+        p.render();
+    }
+
     let out_path = match outdir {
         Some(dir) => dir
             .join(path.file_stem().unwrap_or_default())
             .with_extension("avif"),
         None => path.with_extension("avif"),
     };
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
 
-    let img = if is_raw(path) {
+    let result = if is_raw(path) {
         decode_raw(path)
     } else {
         decode_image(path)
-    }
-    .with_context(|| format!("Failed to decode {}", path.display()))?;
+    };
+
+    let img = match result {
+        Ok(img) => img,
+        Err(e) => {
+            let msg = format!("{e:#}");
+            let mut p = progress.lock().unwrap();
+            p.set(idx, Status::Failed(msg.clone()));
+            p.render();
+            return Err(e).with_context(|| format!("Failed to decode {}", path.display()));
+        }
+    };
 
     let avif_data = encode_avif(img, quality, speed)?;
 
@@ -135,15 +225,17 @@ fn process_file(
             .with_context(|| format!("Failed to move {} → {}", path.display(), dest.display()))?;
     }
 
-    let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-    println!("[{n}/{total}] {name} → {}KB", avif_data.len() / 1024);
+    {
+        let mut p = progress.lock().unwrap();
+        p.set(idx, Status::Done(avif_data.len() / 1024));
+        p.render();
+    }
+
     Ok(())
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let total = args.files.len();
-    let done = AtomicUsize::new(0);
 
     if let Some(ref dir) = args.outdir {
         fs::create_dir_all(dir).context("Failed to create output directory")?;
@@ -152,17 +244,42 @@ fn main() -> Result<()> {
         fs::create_dir_all(dir).context("Failed to create originals directory")?;
     }
 
-    args.files.par_iter().try_for_each(|path| {
-        process_file(
-            path,
-            args.quality,
-            args.speed,
-            args.outdir.as_deref(),
-            args.move_originals.as_deref(),
-            &done,
-            total,
-        )
-    })?;
+    let progress = Mutex::new(Progress::new(&args.files));
 
-    Ok(())
+    // Render loop in background to show spinner-like updates
+    let progress_ref = &progress;
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let done_ref = &done;
+
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            while !done_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
+                progress_ref.lock().unwrap().render();
+            }
+        });
+
+        let result: Result<()> = args
+            .files
+            .par_iter()
+            .enumerate()
+            .try_for_each(|(idx, path)| {
+                process_file(
+                    idx,
+                    path,
+                    args.quality,
+                    args.speed,
+                    args.outdir.as_deref(),
+                    args.move_originals.as_deref(),
+                    progress_ref,
+                )
+            });
+
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+
+        // Final render
+        progress.lock().unwrap().render();
+
+        result
+    })
 }
