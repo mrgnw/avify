@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Mutex;
 
 #[derive(Parser)]
@@ -253,22 +254,27 @@ fn main() -> Result<()> {
     }
 
     let progress = Mutex::new(Progress::new(&args.files));
+    let next = AtomicUsize::new(0);
 
-    let result: Result<()> = args
-        .files
-        .par_iter()
-        .with_min_len(1)
-        .enumerate()
-        .try_for_each(|(idx, path)| {
-            process_file(
-                idx,
-                path,
-                args.quality,
-                args.speed,
-                args.outdir.as_deref(),
-                args.move_originals.as_deref(),
-                &progress,
-            )
+    let result: Result<()> = (0..rayon::current_num_threads())
+        .into_par_iter()
+        .try_for_each(|_| -> Result<()> {
+            loop {
+                let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if idx >= args.files.len() {
+                    break;
+                }
+                process_file(
+                    idx,
+                    &args.files[idx],
+                    args.quality,
+                    args.speed,
+                    args.outdir.as_deref(),
+                    args.move_originals.as_deref(),
+                    &progress,
+                )?;
+            }
+            Ok(())
         });
 
     {
