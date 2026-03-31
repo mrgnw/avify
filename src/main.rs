@@ -71,31 +71,47 @@ impl Progress {
 
     fn render(&mut self) {
         let total = self.statuses.len();
+        let width = total.to_string().len();
         let mut out = io::stderr().lock();
 
-        // Move cursor up to redraw existing lines
         if self.rendered_lines > 0 {
             write!(out, "\x1b[{}A", self.rendered_lines).ok();
         }
 
         let mut lines = 0;
         for (i, status) in self.statuses.iter().enumerate() {
+            let n = i + 1;
             match status {
                 Status::Pending => continue,
                 Status::Processing => {
-                    let n = i + 1;
-                    write!(out, "\x1b[2K[{n}/{total}] {} →\n", self.names[i]).ok();
+                    // yellow
+                    write!(
+                        out,
+                        "\x1b[2K\x1b[33m{n:>width$}/{total} {} →\x1b[0m\n",
+                        self.names[i]
+                    )
+                    .ok();
                     lines += 1;
                 }
                 Status::Done { avif_bytes, .. } => {
-                    let n = i + 1;
                     let kb = avif_bytes / 1024;
-                    write!(out, "\x1b[2K[{n}/{total}] {} → {kb}KB\n", self.names[i]).ok();
+                    // green
+                    write!(
+                        out,
+                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} → {kb}KB\x1b[0m\n",
+                        self.names[i]
+                    )
+                    .ok();
                     lines += 1;
                 }
                 Status::Failed(e) => {
-                    let n = i + 1;
-                    write!(out, "\x1b[2K[{n}/{total}] {} FAIL: {e}\n", self.names[i]).ok();
+                    // red
+                    write!(
+                        out,
+                        "\x1b[2K\x1b[31m{n:>width$}/{total} {} FAIL: {e}\x1b[0m\n",
+                        self.names[i]
+                    )
+                    .ok();
                     lines += 1;
                 }
             }
