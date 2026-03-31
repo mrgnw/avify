@@ -86,7 +86,8 @@ fn parse_f32(s: &str) -> f32 {
 
 /// Apply tone adjustments to an 8-bit RGB buffer in-place.
 pub fn apply_tone(data: &mut [u8], adj: &Adjustments) {
-    if adj.contrast.abs() < 0.5
+    if adj.exposure.abs() < 0.01
+        && adj.contrast.abs() < 0.5
         && adj.highlights.abs() < 0.5
         && adj.shadows.abs() < 0.5
         && adj.whites.abs() < 0.5
@@ -97,7 +98,8 @@ pub fn apply_tone(data: &mut [u8], adj: &Adjustments) {
         return;
     }
 
-    // Build a luminance LUT for contrast/highlights/shadows/whites/blacks
+    // Build a per-channel LUT for exposure/contrast/highlights/shadows/whites/blacks
+    let exposure_mul = (2.0_f32).powf(adj.exposure);
     let mut lut = [0u8; 256];
     let contrast_factor = 1.0 + adj.contrast / 100.0;
     let whites_shift = adj.whites / 100.0 * 64.0;
@@ -105,6 +107,9 @@ pub fn apply_tone(data: &mut [u8], adj: &Adjustments) {
 
     for i in 0..256 {
         let mut v = i as f32 / 255.0;
+
+        // Exposure: multiply in linear-ish space
+        v *= exposure_mul;
 
         // Contrast: S-curve around midpoint
         v = 0.5 + (v - 0.5) * contrast_factor;

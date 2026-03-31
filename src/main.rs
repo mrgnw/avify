@@ -199,8 +199,6 @@ fn decode_raw(path: &Path, use_xmp: bool) -> Result<ImgVec<RGBA8>> {
     };
 
     if let Some(ref adj) = adj {
-        pipeline.ops.basecurve.exposure = adj.exposure;
-
         if let (Some(temp), Some(tint)) = (adj.temperature, adj.tint) {
             pipeline.ops.tolab.set_temp(temp, tint);
         }
