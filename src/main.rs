@@ -1,3 +1,5 @@
+mod xmp;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use imgref::ImgVec;
@@ -27,6 +29,9 @@ struct Args {
         help = "Move originals to this directory after conversion"
     )]
     move_originals: Option<PathBuf>,
+
+    #[arg(short = 'x', long, help = "Apply Lightroom XMP sidecar edits")]
+    xmp: bool,
 
     #[arg(required = true)]
     files: Vec<PathBuf>,
@@ -145,19 +150,47 @@ fn is_raw(path: &Path) -> bool {
     )
 }
 
-fn decode_raw(path: &Path) -> Result<ImgVec<RGBA8>> {
+fn decode_raw(path: &Path, use_xmp: bool) -> Result<ImgVec<RGBA8>> {
     let mut pipeline =
         imagepipe::Pipeline::new_from_file(path).map_err(|e| anyhow::anyhow!("{e}"))?;
     pipeline.globals.settings.maxwidth = 0;
     pipeline.globals.settings.maxheight = 0;
+
+    let adj = if use_xmp {
+        xmp::find_sidecar(path).and_then(|p| xmp::parse(&p).ok())
+    } else {
+        None
+    };
+
+    if let Some(ref adj) = adj {
+        pipeline.ops.basecurve.exposure = adj.exposure;
+
+        if let (Some(temp), Some(tint)) = (adj.temperature, adj.tint) {
+            pipeline.ops.tolab.set_temp(temp, tint);
+        }
+
+        if adj.has_crop {
+            pipeline.ops.rotatecrop.crop_top = adj.crop_top;
+            pipeline.ops.rotatecrop.crop_left = adj.crop_left;
+            pipeline.ops.rotatecrop.crop_bottom = 1.0 - adj.crop_bottom;
+            pipeline.ops.rotatecrop.crop_right = 1.0 - adj.crop_right;
+            pipeline.ops.rotatecrop.rotation = adj.crop_angle;
+        }
+    }
+
     let decoded = pipeline
         .output_8bit(None)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let width = decoded.width as usize;
     let height = decoded.height as usize;
-    let pixels: Vec<RGBA8> = decoded
-        .data
+    let mut data = decoded.data;
+
+    if let Some(ref adj) = adj {
+        xmp::apply_tone(&mut data, adj);
+    }
+
+    let pixels: Vec<RGBA8> = data
         .chunks_exact(3)
         .map(|rgb| RGBA8::new(rgb[0], rgb[1], rgb[2], 255))
         .collect();
@@ -197,6 +230,7 @@ fn process_file(
     path: &PathBuf,
     quality: f32,
     speed: u8,
+    use_xmp: bool,
     outdir: Option<&Path>,
     move_originals: Option<&Path>,
     progress: &Mutex<Progress>,
@@ -215,7 +249,7 @@ fn process_file(
     };
 
     let result = if is_raw(path) {
-        decode_raw(path)
+        decode_raw(path, use_xmp)
     } else {
         decode_image(path)
     };
@@ -285,6 +319,7 @@ fn main() -> Result<()> {
                     &args.files[idx],
                     args.quality,
                     args.speed,
+                    args.xmp,
                     args.outdir.as_deref(),
                     args.move_originals.as_deref(),
                     &progress,

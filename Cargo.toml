@@ -9,6 +9,7 @@ image = { version = "0.24", default-features = false, features = ["jpeg", "png",
 ravif = "0.13"
 imgref = "1"
 rgb = "0.8"
+roxmltree = "0.21"
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
 anyhow = "1"
