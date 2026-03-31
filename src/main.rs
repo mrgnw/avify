@@ -257,6 +257,7 @@ fn main() -> Result<()> {
     let result: Result<()> = args
         .files
         .par_iter()
+        .with_min_len(1)
         .enumerate()
         .try_for_each(|(idx, path)| {
             process_file(
