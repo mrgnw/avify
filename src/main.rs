@@ -48,7 +48,8 @@ enum Status {
 struct Progress {
     names: Vec<String>,
     statuses: Vec<Status>,
-    rendered_lines: usize,
+    flushed: usize,
+    active_lines: usize,
 }
 
 impl Progress {
@@ -66,7 +67,8 @@ impl Progress {
         Self {
             names,
             statuses,
-            rendered_lines: 0,
+            flushed: 0,
+            active_lines: 0,
         }
     }
 
@@ -79,50 +81,84 @@ impl Progress {
         let width = total.to_string().len();
         let mut out = io::stderr().lock();
 
-        if self.rendered_lines > 0 {
-            write!(out, "\x1b[{}A", self.rendered_lines).ok();
+        // Erase the active (in-progress) zone
+        if self.active_lines > 0 {
+            write!(out, "\x1b[{}A", self.active_lines).ok();
+            for _ in 0..self.active_lines {
+                write!(out, "\x1b[2K\n").ok();
+            }
+            write!(out, "\x1b[{}A", self.active_lines).ok();
         }
 
-        let mut lines = 0;
-        for (i, status) in self.statuses.iter().enumerate() {
-            let n = i + 1;
-            match status {
-                Status::Pending => continue,
+        // Flush completed files at the front (sequential, never redrawn)
+        while self.flushed < total {
+            match &self.statuses[self.flushed] {
+                Status::Done { avif_bytes, .. } => {
+                    let n = self.flushed + 1;
+                    let kb = avif_bytes / 1024;
+                    write!(
+                        out,
+                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} → {kb}KB\x1b[0m\n",
+                        self.names[self.flushed]
+                    )
+                    .ok();
+                    self.flushed += 1;
+                }
+                Status::Failed(e) => {
+                    let n = self.flushed + 1;
+                    let e = e.clone();
+                    write!(
+                        out,
+                        "\x1b[2K\x1b[31m{n:>width$}/{total} {} FAIL: {e}\x1b[0m\n",
+                        self.names[self.flushed]
+                    )
+                    .ok();
+                    self.flushed += 1;
+                }
+                _ => break,
+            }
+        }
+
+        // Draw active (in-progress) lines — only these get redrawn
+        let mut active = 0;
+        for i in self.flushed..total {
+            match &self.statuses[i] {
                 Status::Processing => {
-                    // yellow
+                    let n = i + 1;
                     write!(
                         out,
                         "\x1b[2K\x1b[33m{n:>width$}/{total} {} →\x1b[0m\n",
                         self.names[i]
                     )
                     .ok();
-                    lines += 1;
+                    active += 1;
                 }
                 Status::Done { avif_bytes, .. } => {
+                    let n = i + 1;
                     let kb = avif_bytes / 1024;
-                    // green
                     write!(
                         out,
                         "\x1b[2K\x1b[32m{n:>width$}/{total} {} → {kb}KB\x1b[0m\n",
                         self.names[i]
                     )
                     .ok();
-                    lines += 1;
+                    active += 1;
                 }
                 Status::Failed(e) => {
-                    // red
+                    let n = i + 1;
                     write!(
                         out,
                         "\x1b[2K\x1b[31m{n:>width$}/{total} {} FAIL: {e}\x1b[0m\n",
                         self.names[i]
                     )
                     .ok();
-                    lines += 1;
+                    active += 1;
                 }
+                Status::Pending => break,
             }
         }
 
-        self.rendered_lines = lines;
+        self.active_lines = active;
         out.flush().ok();
     }
 }
