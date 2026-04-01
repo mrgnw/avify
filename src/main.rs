@@ -5,11 +5,17 @@ use clap::Parser;
 use imgref::ImgVec;
 use ravif::{BitDepth, EncodedImage, Encoder, RGBA8};
 use rayon::prelude::*;
+use rgb::RGB8;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Mutex;
+
+enum DecodedImage {
+    Rgb(ImgVec<RGB8>),
+    Rgba(ImgVec<RGBA8>),
+}
 
 #[derive(Parser)]
 #[command(about = "Convert images to AVIF (supports RAW + standard formats)")]
@@ -17,7 +23,7 @@ struct Args {
     #[arg(short, long, default_value = "80")]
     quality: f32,
 
-    #[arg(short, long, default_value = "6")]
+    #[arg(short, long, default_value = "10")]
     speed: u8,
 
     #[arg(short, long, help = "Output directory for AVIF files")]
@@ -186,7 +192,7 @@ fn is_raw(path: &Path) -> bool {
     )
 }
 
-fn decode_raw(path: &Path, use_xmp: bool) -> Result<ImgVec<RGBA8>> {
+fn decode_raw(path: &Path, use_xmp: bool) -> Result<DecodedImage> {
     let mut pipeline =
         imagepipe::Pipeline::new_from_file(path).map_err(|e| anyhow::anyhow!("{e}"))?;
     pipeline.globals.settings.maxwidth = 0;
@@ -224,37 +230,59 @@ fn decode_raw(path: &Path, use_xmp: bool) -> Result<ImgVec<RGBA8>> {
         xmp::apply_tone(&mut data, adj);
     }
 
-    let pixels: Vec<RGBA8> = data
+    let pixels: Vec<RGB8> = data
         .chunks_exact(3)
-        .map(|rgb| RGBA8::new(rgb[0], rgb[1], rgb[2], 255))
+        .map(|rgb| RGB8::new(rgb[0], rgb[1], rgb[2]))
         .collect();
 
-    Ok(ImgVec::new(pixels, width, height))
+    Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
 }
 
-fn decode_image(path: &Path) -> Result<ImgVec<RGBA8>> {
-    let img = image::open(path)
-        .with_context(|| format!("Failed to open {}", path.display()))?
-        .into_rgba8();
-    let width = img.width() as usize;
-    let height = img.height() as usize;
-    let pixels: Vec<RGBA8> = img
-        .pixels()
-        .map(|px| RGBA8::new(px[0], px[1], px[2], px[3]))
-        .collect();
-
-    Ok(ImgVec::new(pixels, width, height))
+fn has_alpha(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("png" | "webp")
+    )
 }
 
-fn encode_avif(img: ImgVec<RGBA8>, quality: f32, speed: u8) -> Result<Vec<u8>> {
+fn decode_image(path: &Path) -> Result<DecodedImage> {
+    let img = image::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+
+    if has_alpha(path) {
+        let rgba = img.into_rgba8();
+        let width = rgba.width() as usize;
+        let height = rgba.height() as usize;
+        let pixels: Vec<RGBA8> = rgba
+            .pixels()
+            .map(|px| RGBA8::new(px[0], px[1], px[2], px[3]))
+            .collect();
+        Ok(DecodedImage::Rgba(ImgVec::new(pixels, width, height)))
+    } else {
+        let rgb = img.into_rgb8();
+        let width = rgb.width() as usize;
+        let height = rgb.height() as usize;
+        let pixels: Vec<RGB8> = rgb
+            .pixels()
+            .map(|px| RGB8::new(px[0], px[1], px[2]))
+            .collect();
+        Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
+    }
+}
+
+fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
     let enc = Encoder::new()
         .with_quality(quality)
         .with_speed(speed)
         .with_bit_depth(BitDepth::Ten);
 
-    let EncodedImage { avif_file, .. } = enc
-        .encode_rgba(img.as_ref())
-        .context("AVIF encoding failed")?;
+    let EncodedImage { avif_file, .. } = match img {
+        DecodedImage::Rgb(rgb) => enc.encode_rgb(rgb.as_ref()),
+        DecodedImage::Rgba(rgba) => enc.encode_rgba(rgba.as_ref()),
+    }
+    .context("AVIF encoding failed")?;
 
     Ok(avif_file)
 }
