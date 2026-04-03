@@ -169,27 +169,28 @@ impl Progress {
     }
 }
 
-fn is_raw(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .as_deref(),
+enum ImageFormat {
+    Raw,
+    Heic,
+    Standard,
+    StandardAlpha,
+}
+
+fn classify(path: &Path) -> ImageFormat {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
         Some(
-            "arw"
-                | "cr2"
-                | "cr3"
-                | "dng"
-                | "nef"
-                | "orf"
-                | "raf"
-                | "raw"
-                | "rw2"
-                | "pef"
-                | "srw"
-                | "x3f"
-        )
-    )
+            "arw" | "cr2" | "cr3" | "dng" | "nef" | "orf" | "raf" | "raw" | "rw2" | "pef" | "srw"
+            | "x3f",
+        ) => ImageFormat::Raw,
+        Some("heic" | "heif") => ImageFormat::Heic,
+        Some("png" | "webp") => ImageFormat::StandardAlpha,
+        _ => ImageFormat::Standard,
+    }
 }
 
 fn decode_raw(path: &Path, use_xmp: bool) -> Result<DecodedImage> {
@@ -238,20 +239,37 @@ fn decode_raw(path: &Path, use_xmp: bool) -> Result<DecodedImage> {
     Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
 }
 
-fn has_alpha(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .as_deref(),
-        Some("png" | "webp")
-    )
+fn decode_heic(path: &Path) -> Result<DecodedImage> {
+    use libheif_rs::{ColorSpace, HeifContext, LibHeif, RgbChroma};
+
+    let lib_heif = LibHeif::new();
+    let ctx = HeifContext::read_from_file(path.to_str().unwrap())
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+    let handle = ctx.primary_image_handle()?;
+    let width = handle.width() as usize;
+    let height = handle.height() as usize;
+
+    let image = lib_heif.decode(&handle, ColorSpace::Rgb(RgbChroma::Rgb), None)?;
+    let plane = image.planes().interleaved.unwrap();
+    let stride = plane.stride;
+    let data = plane.data;
+
+    let row_bytes = width * 3;
+    let mut pixels = Vec::with_capacity(width * height);
+    for y in 0..height {
+        let row = &data[y * stride..y * stride + row_bytes];
+        for chunk in row.chunks_exact(3) {
+            pixels.push(RGB8::new(chunk[0], chunk[1], chunk[2]));
+        }
+    }
+
+    Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
 }
 
-fn decode_image(path: &Path) -> Result<DecodedImage> {
+fn decode_standard(path: &Path, alpha: bool) -> Result<DecodedImage> {
     let img = image::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
 
-    if has_alpha(path) {
+    if alpha {
         let rgba = img.into_rgba8();
         let width = rgba.width() as usize;
         let height = rgba.height() as usize;
@@ -310,10 +328,11 @@ fn process_file(
         None => path.with_extension("avif"),
     };
 
-    let result = if is_raw(path) {
-        decode_raw(path, use_xmp)
-    } else {
-        decode_image(path)
+    let result = match classify(path) {
+        ImageFormat::Raw => decode_raw(path, use_xmp),
+        ImageFormat::Heic => decode_heic(path),
+        ImageFormat::StandardAlpha => decode_standard(path, true),
+        ImageFormat::Standard => decode_standard(path, false),
     };
 
     let img = match result {
