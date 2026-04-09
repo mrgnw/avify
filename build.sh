@@ -48,6 +48,6 @@ fi
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$(brew --prefix libde265)/lib/pkgconfig"
 cargo install --path .
-install_name_tool -add_rpath "$PREFIX/lib" "$(which img2avif)"
+install_name_tool -add_rpath "$PREFIX/lib" "$(which avify)"
 
-echo "Done. img2avif installed to $(which img2avif)"
+echo "Done. avify installed to $(which avify)"

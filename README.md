@@ -1,4 +1,4 @@
-# img2avif
+# avify
 
 Batch convert images to AVIF with parallel encoding.
 
@@ -9,13 +9,13 @@ Supports RAW camera files (ARW, CR2, CR3, DNG, NEF, etc.), HEIC/HEIF, and standa
 ## Install
 
 ```
-cargo install img2avif
+cargo install avify
 ```
 
 HEIC/HEIF support is enabled by default but requires [libheif](https://github.com/nicmcd/libheif) system libraries. To install without HEIC:
 
 ```
-cargo install img2avif --no-default-features
+cargo install avify --no-default-features
 ```
 
 ### macOS (with HEIC)
@@ -31,7 +31,7 @@ See `build.sh` for a script that builds a minimal decode-only libheif from sourc
 ## Usage
 
 ```
-img2avif [OPTIONS] [FILES]...
+avify [OPTIONS] [FILES]...
 ```
 
 If no files are given, converts all supported images in the current directory.
@@ -50,13 +50,13 @@ If no files are given, converts all supported images in the current directory.
 ### Examples
 
 ```sh
-img2avif *.jpg
+avify *.jpg
 
-img2avif -q 90 -s 6 photo.arw
+avify -q 90 -s 6 photo.arw
 
-img2avif -o converted/ -m originals/
+avify -o converted/ -m originals/
 
-img2avif -x raw_photos/*.cr3
+avify -x raw_photos/*.cr3
 ```
 
 ## Features
