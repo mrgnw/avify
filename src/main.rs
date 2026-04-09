@@ -36,10 +36,12 @@ struct Args {
     )]
     move_originals: Option<PathBuf>,
 
+    #[arg(short, long, help = "Trash originals after conversion (macOS)")]
+    trash: bool,
+
     #[arg(short = 'x', long, help = "Apply Lightroom XMP sidecar edits")]
     xmp: bool,
 
-    #[arg(required = true)]
     files: Vec<PathBuf>,
 }
 
@@ -171,6 +173,7 @@ impl Progress {
 
 enum ImageFormat {
     Raw,
+    #[cfg(feature = "heic")]
     Heic,
     Standard,
     StandardAlpha,
@@ -187,6 +190,7 @@ fn classify(path: &Path) -> ImageFormat {
             "arw" | "cr2" | "cr3" | "dng" | "nef" | "orf" | "raf" | "raw" | "rw2" | "pef" | "srw"
             | "x3f",
         ) => ImageFormat::Raw,
+        #[cfg(feature = "heic")]
         Some("heic" | "heif") => ImageFormat::Heic,
         Some("png" | "webp") => ImageFormat::StandardAlpha,
         _ => ImageFormat::Standard,
@@ -239,6 +243,7 @@ fn decode_raw(path: &Path, use_xmp: bool) -> Result<DecodedImage> {
     Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
 }
 
+#[cfg(feature = "heic")]
 fn decode_heic(path: &Path) -> Result<DecodedImage> {
     use libheif_rs::{ColorSpace, HeifContext, LibHeif, RgbChroma};
 
@@ -305,12 +310,37 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
     Ok(avif_file)
 }
 
+fn trash_file(path: &Path) -> Result<()> {
+    let posix = path
+        .canonicalize()
+        .with_context(|| format!("Failed to resolve {}", path.display()))?
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let script = format!(
+        "tell application \"Finder\" to delete (POSIX file \"{}\" as alias)",
+        posix
+    );
+    let status = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .context("Failed to run osascript")?;
+    if !status.status.success() {
+        anyhow::bail!(
+            "Trash failed: {}",
+            String::from_utf8_lossy(&status.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 fn process_file(
     idx: usize,
     path: &PathBuf,
     quality: f32,
     speed: u8,
     use_xmp: bool,
+    trash_originals: bool,
     outdir: Option<&Path>,
     move_originals: Option<&Path>,
     progress: &Mutex<Progress>,
@@ -330,6 +360,7 @@ fn process_file(
 
     let result = match classify(path) {
         ImageFormat::Raw => decode_raw(path, use_xmp),
+        #[cfg(feature = "heic")]
         ImageFormat::Heic => decode_heic(path),
         ImageFormat::StandardAlpha => decode_standard(path, true),
         ImageFormat::Standard => decode_standard(path, false),
@@ -348,6 +379,8 @@ fn process_file(
 
     let avif_data = encode_avif(img, quality, speed)?;
 
+    let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
     fs::write(&out_path, &avif_data)
         .with_context(|| format!("Failed to write {}", out_path.display()))?;
 
@@ -355,9 +388,9 @@ fn process_file(
         let dest = dir.join(path.file_name().unwrap_or_default());
         fs::rename(path, &dest)
             .with_context(|| format!("Failed to move {} → {}", path.display(), dest.display()))?;
+    } else if trash_originals {
+        trash_file(path)?;
     }
-
-    let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
     {
         let mut p = progress.lock().unwrap();
@@ -374,8 +407,43 @@ fn process_file(
     Ok(())
 }
 
+#[cfg(feature = "heic")]
+const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
+    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif",
+];
+
+#[cfg(not(feature = "heic"))]
+const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "jpg",
+    "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif",
+];
+
+fn collect_images_from_cwd() -> Result<Vec<PathBuf>> {
+    let mut files: Vec<PathBuf> = fs::read_dir(".")
+        .context("Failed to read current directory")?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| SUPPORTED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+
+    if args.files.is_empty() {
+        args.files = collect_images_from_cwd()?;
+        if args.files.is_empty() {
+            anyhow::bail!("No image files found in current directory");
+        }
+    }
 
     if let Some(ref dir) = args.outdir {
         fs::create_dir_all(dir).context("Failed to create output directory")?;
@@ -401,6 +469,7 @@ fn main() -> Result<()> {
                     args.quality,
                     args.speed,
                     args.xmp,
+                    args.trash,
                     args.outdir.as_deref(),
                     args.move_originals.as_deref(),
                     &progress,
