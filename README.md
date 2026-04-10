@@ -2,7 +2,7 @@
 
 Batch convert images to AVIF with parallel encoding.
 
-Supports RAW camera files (ARW, CR2, CR3, DNG, NEF, etc.), HEIC/HEIF, and standard formats (JPEG, PNG, WebP, BMP, TIFF, GIF). Optionally applies Lightroom XMP sidecar edits to RAW files.
+Supports RAW camera files (ARW, CR2, CR3, DNG, NEF, etc.), HEIC/HEIF, and standard formats (JPEG, PNG, WebP, BMP, TIFF, GIF). 
 
 > **Note:** This is proof-of-concept code. It may be unreliable and is not actively maintained.
 
