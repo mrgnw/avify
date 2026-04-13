@@ -175,6 +175,9 @@ enum ImageFormat {
     Raw,
     #[cfg(feature = "heic")]
     Heic,
+    #[cfg(not(feature = "heic"))]
+    HeicUnsupported,
+    Jxl,
     Standard,
     StandardAlpha,
 }
@@ -192,6 +195,9 @@ fn classify(path: &Path) -> ImageFormat {
         ) => ImageFormat::Raw,
         #[cfg(feature = "heic")]
         Some("heic" | "heif") => ImageFormat::Heic,
+        #[cfg(not(feature = "heic"))]
+        Some("heic" | "heif") => ImageFormat::HeicUnsupported,
+        Some("jxl") => ImageFormat::Jxl,
         Some("png" | "webp") => ImageFormat::StandardAlpha,
         _ => ImageFormat::Standard,
     }
@@ -269,6 +275,68 @@ fn decode_heic(path: &Path) -> Result<DecodedImage> {
     }
 
     Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
+}
+
+fn decode_jxl(path: &Path) -> Result<DecodedImage> {
+    use jxl_oxide::{JxlImage, PixelFormat};
+
+    let image = JxlImage::builder()
+        .open(path)
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+
+    let render = image.render_frame(0).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let pf = image.pixel_format();
+    let mut stream = render.stream();
+    let width = stream.width() as usize;
+    let height = stream.height() as usize;
+    let channels = stream.channels() as usize;
+
+    let mut buf = vec![0f32; width * height * channels];
+    stream.write_to_buffer(&mut buf);
+
+    let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+
+    match pf {
+        PixelFormat::Rgb => {
+            let pixels: Vec<RGB8> = buf
+                .chunks_exact(3)
+                .map(|c| RGB8::new(to_u8(c[0]), to_u8(c[1]), to_u8(c[2])))
+                .collect();
+            Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
+        }
+        PixelFormat::Rgba => {
+            let pixels: Vec<RGBA8> = buf
+                .chunks_exact(4)
+                .map(|c| RGBA8::new(to_u8(c[0]), to_u8(c[1]), to_u8(c[2]), to_u8(c[3])))
+                .collect();
+            Ok(DecodedImage::Rgba(ImgVec::new(pixels, width, height)))
+        }
+        PixelFormat::Gray => {
+            let pixels: Vec<RGB8> = buf
+                .iter()
+                .map(|&v| {
+                    let g = to_u8(v);
+                    RGB8::new(g, g, g)
+                })
+                .collect();
+            Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
+        }
+        PixelFormat::Graya => {
+            let pixels: Vec<RGBA8> = buf
+                .chunks_exact(2)
+                .map(|c| {
+                    let g = to_u8(c[0]);
+                    RGBA8::new(g, g, g, to_u8(c[1]))
+                })
+                .collect();
+            Ok(DecodedImage::Rgba(ImgVec::new(pixels, width, height)))
+        }
+        PixelFormat::Cmyk | PixelFormat::Cmyka => {
+            anyhow::bail!("CMYK JXL not supported")
+        }
+    }
 }
 
 fn decode_standard(path: &Path, alpha: bool) -> Result<DecodedImage> {
@@ -362,6 +430,23 @@ fn process_file(
         ImageFormat::Raw => decode_raw(path, use_xmp),
         #[cfg(feature = "heic")]
         ImageFormat::Heic => decode_heic(path),
+        #[cfg(not(feature = "heic"))]
+        ImageFormat::HeicUnsupported => {
+            let name = path.file_stem().unwrap_or_default().to_string_lossy();
+            let path_str = path.display();
+            anyhow::bail!(
+                "HEIC support not compiled in\n\
+                 \n\
+                 Convert first with sips:\n\
+                 \n\
+                 \x1b[36m  sips -s format png \"{path_str}\" --out \"{name}.png\"\x1b[0m\n\
+                 \n\
+                 Or install libheif for native support:\n\
+                 \n\
+                 \x1b[36m  brew install libheif && cargo install avify\x1b[0m"
+            );
+        }
+        ImageFormat::Jxl => decode_jxl(path),
         ImageFormat::StandardAlpha => decode_standard(path, true),
         ImageFormat::Standard => decode_standard(path, false),
     };
@@ -410,38 +495,56 @@ fn process_file(
 #[cfg(feature = "heic")]
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
-    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif",
+    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl",
 ];
 
 #[cfg(not(feature = "heic"))]
 const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "jpg",
-    "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif",
+    "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
+    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl",
 ];
 
-fn collect_images_from_cwd() -> Result<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> = fs::read_dir(".")
-        .context("Failed to read current directory")?
+fn collect_images_from_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+        .with_context(|| format!("Failed to read {}", dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
-            p.extension()
-                .and_then(|e| e.to_str())
-                .map(|e| SUPPORTED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
-                .unwrap_or(false)
+            p.is_file()
+                && p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| SUPPORTED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+                    .unwrap_or(false)
         })
         .collect();
     files.sort();
     Ok(files)
 }
 
+fn expand_dirs(files: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+    let mut out = Vec::with_capacity(files.len());
+    for p in files {
+        if p.is_dir() {
+            out.extend(collect_images_from_dir(&p)?);
+        } else {
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
 fn main() -> Result<()> {
     let mut args = Args::parse();
 
     if args.files.is_empty() {
-        args.files = collect_images_from_cwd()?;
+        args.files = collect_images_from_dir(Path::new("."))?;
         if args.files.is_empty() {
             anyhow::bail!("No image files found in current directory");
+        }
+    } else {
+        args.files = expand_dirs(std::mem::take(&mut args.files))?;
+        if args.files.is_empty() {
+            anyhow::bail!("No image files found in given paths");
         }
     }
 

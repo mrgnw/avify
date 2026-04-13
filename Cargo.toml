@@ -15,7 +15,7 @@ heic = ["dep:libheif-rs"]
 
 [dependencies]
 imagepipe = "0.5"
-image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff", "gif"] }
+image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff", "gif", "tga"] }
 ravif = "0.13"
 imgref = "1"
 rgb = "0.8"
@@ -24,6 +24,7 @@ clap = { version = "4", features = ["derive"] }
 rayon = "1"
 anyhow = "1"
 libheif-rs = { version = "2.7", optional = true }
+jxl-oxide = { version = "0.12.5", default-features = false }
 
 [profile.dev.package.rav1e]
 opt-level = 3
