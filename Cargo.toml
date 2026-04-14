@@ -1,6 +1,6 @@
 [package]
 name = "avify"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Batch convert images to AVIF — supports RAW, HEIC/HEIF, and standard formats with parallel encoding"
 license = "MIT"

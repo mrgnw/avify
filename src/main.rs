@@ -18,7 +18,10 @@ enum DecodedImage {
 }
 
 #[derive(Parser)]
-#[command(about = "Convert images to AVIF (supports RAW + standard formats)")]
+#[command(
+    version,
+    about = "Convert images to AVIF (supports RAW + standard formats)"
+)]
 struct Args {
     #[arg(short, long, default_value = "80")]
     quality: f32,
