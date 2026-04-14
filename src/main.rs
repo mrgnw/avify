@@ -183,17 +183,68 @@ enum ImageFormat {
     StandardAlpha,
 }
 
+fn sniff_format(path: &Path) -> Option<ImageFormat> {
+    use std::io::Read;
+    let mut f = fs::File::open(path).ok()?;
+    let mut buf = [0u8; 12];
+    let n = f.read(&mut buf).ok()?;
+    if n < 12 {
+        return None;
+    }
+    if buf.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(ImageFormat::StandardAlpha);
+    }
+    if buf.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some(ImageFormat::Standard);
+    }
+    if buf.starts_with(b"GIF87a") || buf.starts_with(b"GIF89a") {
+        return Some(ImageFormat::Standard);
+    }
+    if &buf[0..4] == b"RIFF" && &buf[8..12] == b"WEBP" {
+        return Some(ImageFormat::StandardAlpha);
+    }
+    if buf.starts_with(b"BM") {
+        return Some(ImageFormat::Standard);
+    }
+    if buf.starts_with(b"II*\0") || buf.starts_with(b"MM\0*") {
+        return Some(ImageFormat::Standard);
+    }
+    if &buf[4..8] == b"ftyp" {
+        #[cfg(feature = "heic")]
+        return Some(ImageFormat::Heic);
+        #[cfg(not(feature = "heic"))]
+        return Some(ImageFormat::HeicUnsupported);
+    }
+    if buf.starts_with(&[0xFF, 0x0A])
+        || buf.starts_with(&[0x00, 0x00, 0x00, 0x0C, b'J', b'X', b'L', b' '])
+    {
+        return Some(ImageFormat::Jxl);
+    }
+    if buf.starts_with(b"8BPS") {
+        return Some(ImageFormat::Psd);
+    }
+    None
+}
+
 fn classify(path: &Path) -> ImageFormat {
-    match path
+    let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
+        .map(|e| e.to_ascii_lowercase());
+
+    match ext.as_deref() {
         Some(
             "arw" | "cr2" | "cr3" | "dng" | "nef" | "orf" | "raf" | "raw" | "rw2" | "pef" | "srw"
             | "x3f",
-        ) => ImageFormat::Raw,
+        ) => return ImageFormat::Raw,
+        _ => {}
+    }
+
+    if let Some(sniffed) = sniff_format(path) {
+        return sniffed;
+    }
+
+    match ext.as_deref() {
         #[cfg(feature = "heic")]
         Some("heic" | "heif") => ImageFormat::Heic,
         #[cfg(not(feature = "heic"))]
@@ -360,7 +411,12 @@ fn decode_psd(path: &Path) -> Result<DecodedImage> {
 }
 
 fn decode_standard(path: &Path, alpha: bool) -> Result<DecodedImage> {
-    let img = image::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    let img = image::io::Reader::open(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?
+        .with_guessed_format()
+        .with_context(|| format!("Failed to guess format for {}", path.display()))?
+        .decode()
+        .with_context(|| format!("Failed to decode {}", path.display()))?;
 
     if alpha {
         let rgba = img.into_rgba8();
