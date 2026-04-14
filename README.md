@@ -12,18 +12,13 @@ Supports RAW camera files (ARW, CR2, CR3, DNG, NEF, etc.), HEIC/HEIF, and standa
 cargo install avify
 ```
 
-HEIC/HEIF support is enabled by default but requires [libheif](https://github.com/nicmcd/libheif) system libraries. To install without HEIC:
+### HEIC/HEIF support (optional)
+
+HEIC requires the `libheif` system library. Enable with:
 
 ```
-cargo install avify --no-default-features
-```
-
-### macOS (with HEIC)
-
-Install libheif dependencies, then build:
-
-```
-brew install pkgconf libde265
+brew install libheif
+cargo install avify --features heic
 ```
 
 See `build.sh` for a script that builds a minimal decode-only libheif from source.
@@ -63,7 +58,7 @@ avify -x raw_photos/*.cr3
 
 - **Parallel encoding** via rayon — uses all CPU cores
 - **RAW support** via imagepipe (ARW, CR2, CR3, DNG, NEF, ORF, RAF, RW2, PEF, SRW, X3F)
-- **HEIC/HEIF support** via libheif (optional, enabled by default)
+- **HEIC/HEIF support** via libheif (optional, opt-in via `--features heic`)
 - **XMP sidecar edits** — applies Lightroom exposure, contrast, highlights, shadows, white balance, crop, saturation, and vibrance adjustments
 - **10-bit AVIF output** for better color depth
 

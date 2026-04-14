@@ -10,7 +10,7 @@ categories = ["command-line-utilities", "multimedia::images"]
 readme = "README.md"
 
 [features]
-default = ["heic"]
+default = []
 heic = ["dep:libheif-rs"]
 
 [dependencies]
