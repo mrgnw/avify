@@ -178,6 +178,7 @@ enum ImageFormat {
     #[cfg(not(feature = "heic"))]
     HeicUnsupported,
     Jxl,
+    Psd,
     Standard,
     StandardAlpha,
 }
@@ -198,6 +199,7 @@ fn classify(path: &Path) -> ImageFormat {
         #[cfg(not(feature = "heic"))]
         Some("heic" | "heif") => ImageFormat::HeicUnsupported,
         Some("jxl") => ImageFormat::Jxl,
+        Some("psd") => ImageFormat::Psd,
         Some("png" | "webp") => ImageFormat::StandardAlpha,
         _ => ImageFormat::Standard,
     }
@@ -339,6 +341,24 @@ fn decode_jxl(path: &Path) -> Result<DecodedImage> {
     }
 }
 
+fn decode_psd(path: &Path) -> Result<DecodedImage> {
+    let bytes = fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let psd = psd::Psd::from_bytes(&bytes)
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
+
+    let width = psd.width() as usize;
+    let height = psd.height() as usize;
+    let rgba = psd.rgba();
+
+    let pixels: Vec<RGBA8> = rgba
+        .chunks_exact(4)
+        .map(|c| RGBA8::new(c[0], c[1], c[2], c[3]))
+        .collect();
+
+    Ok(DecodedImage::Rgba(ImgVec::new(pixels, width, height)))
+}
+
 fn decode_standard(path: &Path, alpha: bool) -> Result<DecodedImage> {
     let img = image::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
 
@@ -447,6 +467,7 @@ fn process_file(
             );
         }
         ImageFormat::Jxl => decode_jxl(path),
+        ImageFormat::Psd => decode_psd(path),
         ImageFormat::StandardAlpha => decode_standard(path, true),
         ImageFormat::Standard => decode_standard(path, false),
     };
@@ -495,13 +516,13 @@ fn process_file(
 #[cfg(feature = "heic")]
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
-    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl",
+    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl", "psd",
 ];
 
 #[cfg(not(feature = "heic"))]
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
-    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl",
+    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl", "psd",
 ];
 
 fn collect_images_from_dir(dir: &Path) -> Result<Vec<PathBuf>> {
