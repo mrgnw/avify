@@ -457,6 +457,33 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
     Ok(avif_file)
 }
 
+fn preserve_timestamps(src: &Path, dst: &Path) -> Result<()> {
+    use std::fs::FileTimes;
+    use std::os::darwin::fs::FileTimesExt;
+
+    let meta = fs::metadata(src)
+        .with_context(|| format!("Failed to read timestamps from {}", src.display()))?;
+
+    let mut times = FileTimes::new();
+    if let Ok(created) = meta.created() {
+        times = times.set_created(created);
+    }
+    if let Ok(modified) = meta.modified() {
+        times = times.set_modified(modified);
+    }
+    if let Ok(accessed) = meta.accessed() {
+        times = times.set_accessed(accessed);
+    }
+
+    let f = fs::File::options()
+        .write(true)
+        .open(dst)
+        .with_context(|| format!("Failed to open {}", dst.display()))?;
+    f.set_times(times)
+        .with_context(|| format!("Failed to set timestamps on {}", dst.display()))?;
+    Ok(())
+}
+
 fn trash_file(path: &Path) -> Result<()> {
     let posix = path
         .canonicalize()
@@ -548,6 +575,8 @@ fn process_file(
 
     fs::write(&out_path, &avif_data)
         .with_context(|| format!("Failed to write {}", out_path.display()))?;
+
+    preserve_timestamps(path, &out_path).ok();
 
     if let Some(dir) = move_originals {
         let dest = dir.join(path.file_name().unwrap_or_default());
