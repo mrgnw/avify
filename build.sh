@@ -47,7 +47,7 @@ if [ ! -f "$PREFIX/lib/libheif.dylib" ]; then
 fi
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$(brew --prefix libde265)/lib/pkgconfig"
-cargo install --path .
+cargo install --path . --features heic
 install_name_tool -add_rpath "$PREFIX/lib" "$(which avify)"
 
 echo "Done. avify installed to $(which avify)"
