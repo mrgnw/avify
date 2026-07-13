@@ -130,47 +130,74 @@ impl Progress {
             }
         }
 
-        // Draw active (in-progress) lines — only these get redrawn
+        // Draw active (in-progress) lines — only these get redrawn.
+        // Each must occupy exactly one terminal row or the erase math above breaks.
+        let cols = term_cols();
         let mut active = 0;
         for i in self.flushed..total {
-            match &self.statuses[i] {
-                Status::Processing => {
-                    let n = i + 1;
-                    write!(
-                        out,
-                        "\x1b[2K\x1b[33m{n:>width$}/{total} {} →\x1b[0m\n",
-                        self.names[i]
-                    )
-                    .ok();
-                    active += 1;
-                }
-                Status::Done { avif_bytes, .. } => {
-                    let n = i + 1;
-                    let kb = avif_bytes / 1024;
-                    write!(
-                        out,
-                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} → {kb}KB\x1b[0m\n",
-                        self.names[i]
-                    )
-                    .ok();
-                    active += 1;
-                }
-                Status::Failed(e) => {
-                    let n = i + 1;
-                    write!(
-                        out,
-                        "\x1b[2K\x1b[31m{n:>width$}/{total} {} FAIL: {e}\x1b[0m\n",
-                        self.names[i]
-                    )
-                    .ok();
-                    active += 1;
-                }
+            let n = i + 1;
+            let (color, text) = match &self.statuses[i] {
+                Status::Processing => ("33", format!("{n:>width$}/{total} {} →", self.names[i])),
+                Status::Done { avif_bytes, .. } => (
+                    "32",
+                    format!(
+                        "{n:>width$}/{total} {} → {}KB",
+                        self.names[i],
+                        avif_bytes / 1024
+                    ),
+                ),
+                Status::Failed(e) => (
+                    "31",
+                    format!("{n:>width$}/{total} {} FAIL: {e}", self.names[i]),
+                ),
                 Status::Pending => break,
-            }
+            };
+            write!(
+                out,
+                "\x1b[2K\x1b[{color}m{}\x1b[0m\n",
+                fit_one_row(&text, cols)
+            )
+            .ok();
+            active += 1;
         }
 
         self.active_lines = active;
         out.flush().ok();
+    }
+}
+
+fn term_cols() -> Option<usize> {
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    let ok = unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) };
+    (ok == 0 && ws.ws_col > 0).then(|| ws.ws_col as usize)
+}
+
+// ponytail: counts chars, not display width — wide (CJK) names can still wrap
+fn fit_one_row(s: &str, cols: Option<usize>) -> String {
+    let first = s.lines().next().unwrap_or("");
+    let Some(max) = cols else {
+        return first.to_string();
+    };
+    if first.chars().count() <= max {
+        return first.to_string();
+    }
+    let cut: String = first.chars().take(max.saturating_sub(1)).collect();
+    format!("{cut}…")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_one_row;
+
+    #[test]
+    fn fit_one_row_keeps_lines_to_one_terminal_row() {
+        assert_eq!(fit_one_row("abcd", Some(4)), "abcd");
+        assert_eq!(fit_one_row("abcdef", Some(4)), "abc…");
+        assert_eq!(fit_one_row("multi\nline error", Some(80)), "multi");
+        assert_eq!(
+            fit_one_row("no tty → no truncation", None),
+            "no tty → no truncation"
+        );
     }
 }
 

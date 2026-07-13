@@ -194,6 +194,7 @@ dependencies = [
  "imagepipe",
  "imgref",
  "jxl-oxide",
+ "libc",
  "libheif-rs",
  "psd",
  "ravif",

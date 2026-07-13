@@ -23,6 +23,7 @@ roxmltree = "0.21"
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
 anyhow = "1"
+libc = "0.2"
 libheif-rs = { version = "2.7", optional = true }
 jxl-oxide = { version = "0.12.5", default-features = false }
 psd = "0.3.5"
