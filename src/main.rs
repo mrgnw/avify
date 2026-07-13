@@ -259,6 +259,32 @@ fn classify(path: &Path) -> ImageFormat {
     }
 }
 
+fn is_dataless(path: &Path) -> bool {
+    use std::os::macos::fs::MetadataExt;
+    const SF_DATALESS: u32 = 0x4000_0000;
+    fs::metadata(path)
+        .map(|m| m.st_flags() & SF_DATALESS != 0)
+        .unwrap_or(false)
+}
+
+fn ensure_local(path: &Path) -> Result<()> {
+    if !is_dataless(path) {
+        return Ok(());
+    }
+    std::process::Command::new("brctl")
+        .arg("download")
+        .arg(path)
+        .output()
+        .context("Failed to run brctl download")?;
+    for _ in 0..600 {
+        if !is_dataless(path) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    anyhow::bail!("iCloud download timed out for {}", path.display())
+}
+
 fn decode_raw(path: &Path, use_xmp: bool) -> Result<DecodedImage> {
     let mut pipeline =
         imagepipe::Pipeline::new_from_file(path).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -524,6 +550,8 @@ fn process_file(
         p.set(idx, Status::Processing);
         p.render();
     }
+
+    ensure_local(path)?;
 
     let out_path = match outdir {
         Some(dir) => dir
