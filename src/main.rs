@@ -586,16 +586,7 @@ fn process_file(
         ImageFormat::Standard => decode_standard(path, false),
     };
 
-    let img = match result {
-        Ok(img) => img,
-        Err(e) => {
-            let msg = format!("{e:#}");
-            let mut p = progress.lock().unwrap();
-            p.set(idx, Status::Failed(msg.clone()));
-            p.render();
-            return Err(e).with_context(|| format!("Failed to decode {}", path.display()));
-        }
-    };
+    let img = result?;
 
     let avif_data = encode_avif(img, quality, speed)?;
 
@@ -695,42 +686,46 @@ fn main() -> Result<()> {
     let progress = Mutex::new(Progress::new(&args.files));
     let next = AtomicUsize::new(0);
 
-    let result: Result<()> = (0..rayon::current_num_threads())
+    (0..rayon::current_num_threads())
         .into_par_iter()
-        .try_for_each(|_| -> Result<()> {
-            loop {
-                let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if idx >= args.files.len() {
-                    break;
-                }
-                process_file(
-                    idx,
-                    &args.files[idx],
-                    args.quality,
-                    args.speed,
-                    args.xmp,
-                    args.trash,
-                    args.outdir.as_deref(),
-                    args.move_originals.as_deref(),
-                    &progress,
-                )?;
+        .for_each(|_| loop {
+            let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if idx >= args.files.len() {
+                break;
             }
-            Ok(())
+            if let Err(e) = process_file(
+                idx,
+                &args.files[idx],
+                args.quality,
+                args.speed,
+                args.xmp,
+                args.trash,
+                args.outdir.as_deref(),
+                args.move_originals.as_deref(),
+                &progress,
+            ) {
+                let mut p = progress.lock().unwrap();
+                p.set(idx, Status::Failed(format!("{e:#}")));
+                p.render();
+            }
         });
 
-    {
+    let failed = {
         let p = progress.lock().unwrap();
         // Don't re-render, just print summary
-        let (mut orig_total, mut avif_total, mut count) = (0u64, 0u64, 0u64);
+        let (mut orig_total, mut avif_total, mut count, mut failed) = (0u64, 0u64, 0u64, 0u64);
         for status in &p.statuses {
-            if let Status::Done {
-                orig_bytes,
-                avif_bytes,
-            } = status
-            {
-                orig_total += orig_bytes;
-                avif_total += *avif_bytes as u64;
-                count += 1;
+            match status {
+                Status::Done {
+                    orig_bytes,
+                    avif_bytes,
+                } => {
+                    orig_total += orig_bytes;
+                    avif_total += *avif_bytes as u64;
+                    count += 1;
+                }
+                Status::Failed(_) => failed += 1,
+                _ => {}
             }
         }
         drop(p);
@@ -759,7 +754,11 @@ fn main() -> Result<()> {
                 .ok();
             }
         }
-    }
+        failed
+    };
 
-    result
+    if failed > 0 {
+        anyhow::bail!("{failed} file(s) failed");
+    }
+    Ok(())
 }
