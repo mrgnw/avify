@@ -49,6 +49,12 @@ struct Args {
     #[arg(short = 'x', long, help = "Apply Lightroom XMP sidecar edits")]
     xmp: bool,
 
+    #[arg(
+        long,
+        help = "Also transcode videos to AV1 (.av1.mp4) — requires ffmpeg"
+    )]
+    video: bool,
+
     files: Vec<PathBuf>,
 }
 
@@ -191,7 +197,18 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::fit_one_row;
+    use super::{fit_one_row, is_video, quality_to_crf};
+    use std::path::Path;
+
+    #[test]
+    fn video_detection_and_crf_mapping() {
+        assert!(is_video(Path::new("clip.MOV")));
+        assert!(is_video(Path::new("rec.mp4")));
+        assert!(!is_video(Path::new("photo.png")));
+        assert_eq!(quality_to_crf(100.0), 0);
+        assert_eq!(quality_to_crf(0.0), 63);
+        assert_eq!(quality_to_crf(80.0), 13);
+    }
 
     #[test]
     fn fit_one_row_keeps_lines_to_one_terminal_row() {
@@ -514,6 +531,69 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
     Ok(avif_file)
 }
 
+const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi"];
+
+fn is_video(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| VIDEO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn video_out_path(path: &Path, outdir: Option<&Path>) -> PathBuf {
+    let name = format!(
+        "{}.av1.mp4",
+        path.file_stem().unwrap_or_default().to_string_lossy()
+    );
+    match outdir {
+        Some(dir) => dir.join(name),
+        None => path.with_file_name(name),
+    }
+}
+
+// quality 0-100 (higher = better) maps to AV1 crf 63-0 (lower = better)
+fn quality_to_crf(quality: f32) -> u32 {
+    ((100.0 - quality.clamp(0.0, 100.0)) * 63.0 / 100.0).round() as u32
+}
+
+// ponytail: shells out to ffmpeg/libaom (software AV1, no HW encode on macOS).
+// speed maps to cpu-used (higher = faster).
+fn transcode_video(src: &Path, dst: &Path, quality: f32, speed: u8) -> Result<u64> {
+    let crf = quality_to_crf(quality);
+    let cpu_used = speed.min(8);
+    let out = std::process::Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-i"])
+        .arg(src)
+        .args([
+            "-c:v",
+            "libaom-av1",
+            "-crf",
+            &crf.to_string(),
+            "-b:v",
+            "0",
+            "-cpu-used",
+            &cpu_used.to_string(),
+            "-row-mt",
+            "1",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "copy",
+        ])
+        .arg(dst)
+        .output()
+        .context("Failed to run ffmpeg (is it installed and on PATH?)")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "ffmpeg failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    fs::metadata(dst)
+        .map(|m| m.len())
+        .with_context(|| format!("Failed to stat {}", dst.display()))
+}
+
 fn preserve_timestamps(src: &Path, dst: &Path) -> Result<()> {
     use std::fs::FileTimes;
     use std::os::darwin::fs::FileTimesExt;
@@ -571,6 +651,7 @@ fn process_file(
     quality: f32,
     speed: u8,
     use_xmp: bool,
+    use_video: bool,
     keep_originals: bool,
     outdir: Option<&Path>,
     move_originals: Option<&Path>,
@@ -584,6 +665,48 @@ fn process_file(
 
     ensure_local(path)?;
 
+    let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
+    let (out_path, out_bytes) = if use_video && is_video(path) {
+        let out = video_out_path(path, outdir);
+        let bytes = transcode_video(path, &out, quality, speed)?;
+        (out, bytes as usize)
+    } else {
+        encode_image(path, quality, speed, use_xmp, outdir)?
+    };
+
+    preserve_timestamps(path, &out_path).ok();
+
+    if let Some(dir) = move_originals {
+        let dest = dir.join(path.file_name().unwrap_or_default());
+        fs::rename(path, &dest)
+            .with_context(|| format!("Failed to move {} → {}", path.display(), dest.display()))?;
+    } else if !keep_originals {
+        trash_file(path)?;
+    }
+
+    {
+        let mut p = progress.lock().unwrap();
+        p.set(
+            idx,
+            Status::Done {
+                orig_bytes,
+                avif_bytes: out_bytes,
+            },
+        );
+        p.render();
+    }
+
+    Ok(())
+}
+
+fn encode_image(
+    path: &Path,
+    quality: f32,
+    speed: u8,
+    use_xmp: bool,
+    outdir: Option<&Path>,
+) -> Result<(PathBuf, usize)> {
     let out_path = match outdir {
         Some(dir) => dir
             .join(path.file_stem().unwrap_or_default())
@@ -621,34 +744,10 @@ fn process_file(
 
     let avif_data = encode_avif(img, quality, speed)?;
 
-    let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-
     fs::write(&out_path, &avif_data)
         .with_context(|| format!("Failed to write {}", out_path.display()))?;
 
-    preserve_timestamps(path, &out_path).ok();
-
-    if let Some(dir) = move_originals {
-        let dest = dir.join(path.file_name().unwrap_or_default());
-        fs::rename(path, &dest)
-            .with_context(|| format!("Failed to move {} → {}", path.display(), dest.display()))?;
-    } else if !keep_originals {
-        trash_file(path)?;
-    }
-
-    {
-        let mut p = progress.lock().unwrap();
-        p.set(
-            idx,
-            Status::Done {
-                orig_bytes,
-                avif_bytes: avif_data.len(),
-            },
-        );
-        p.render();
-    }
-
-    Ok(())
+    Ok((out_path, avif_data.len()))
 }
 
 #[cfg(feature = "heic")]
@@ -663,7 +762,7 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
     "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl", "psd",
 ];
 
-fn collect_images_from_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+fn collect_images_from_dir(dir: &Path, include_video: bool) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .with_context(|| format!("Failed to read {}", dir.display()))?
         .filter_map(|e| e.ok())
@@ -672,7 +771,11 @@ fn collect_images_from_dir(dir: &Path) -> Result<Vec<PathBuf>> {
             p.is_file()
                 && p.extension()
                     .and_then(|e| e.to_str())
-                    .map(|e| SUPPORTED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+                    .map(|e| {
+                        let e = e.to_ascii_lowercase();
+                        SUPPORTED_EXTENSIONS.contains(&e.as_str())
+                            || (include_video && VIDEO_EXTENSIONS.contains(&e.as_str()))
+                    })
                     .unwrap_or(false)
         })
         .collect();
@@ -680,11 +783,11 @@ fn collect_images_from_dir(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn expand_dirs(files: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+fn expand_dirs(files: Vec<PathBuf>, include_video: bool) -> Result<Vec<PathBuf>> {
     let mut out = Vec::with_capacity(files.len());
     for p in files {
         if p.is_dir() {
-            out.extend(collect_images_from_dir(&p)?);
+            out.extend(collect_images_from_dir(&p, include_video)?);
         } else {
             out.push(p);
         }
@@ -696,12 +799,12 @@ fn main() -> Result<()> {
     let mut args = Args::parse();
 
     if args.files.is_empty() {
-        args.files = collect_images_from_dir(Path::new("."))?;
+        args.files = collect_images_from_dir(Path::new("."), args.video)?;
         if args.files.is_empty() {
             anyhow::bail!("No image files found in current directory");
         }
     } else {
-        args.files = expand_dirs(std::mem::take(&mut args.files))?;
+        args.files = expand_dirs(std::mem::take(&mut args.files), args.video)?;
         if args.files.is_empty() {
             anyhow::bail!("No image files found in given paths");
         }
@@ -730,6 +833,7 @@ fn main() -> Result<()> {
                 args.quality,
                 args.speed,
                 args.xmp,
+                args.video,
                 args.keep,
                 args.outdir.as_deref(),
                 args.move_originals.as_deref(),

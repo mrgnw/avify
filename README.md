@@ -43,6 +43,11 @@ If no files are given, converts all supported images in the current directory.
 | `-m, --move-originals` | Move originals to this directory after conversion | |
 | `-k, --keep` | Keep originals (default trashes each on success, macOS) | |
 | `-x, --xmp` | Apply Lightroom XMP sidecar edits | |
+| `--video` | Also transcode videos to AV1 (`.av1.mp4`) — requires `ffmpeg` | off |
+
+### Video (`--video`)
+
+Off by default; images-only. With `--video`, video files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) via `ffmpeg`/libaom. `--quality`/`--speed` map to crf/cpu-used. Software encode only (no AV1 hardware acceleration on macOS) — expect it to be slow, and note AV1 may not preview in QuickLook on pre-M3 Macs.
 
 ### Examples
 
