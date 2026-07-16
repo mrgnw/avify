@@ -39,8 +39,12 @@ struct Args {
     )]
     move_originals: Option<PathBuf>,
 
-    #[arg(short, long, help = "Trash originals after conversion (macOS)")]
-    trash: bool,
+    #[arg(
+        short,
+        long,
+        help = "Keep originals (default: trash each on success, macOS)"
+    )]
+    keep: bool,
 
     #[arg(short = 'x', long, help = "Apply Lightroom XMP sidecar edits")]
     xmp: bool,
@@ -567,7 +571,7 @@ fn process_file(
     quality: f32,
     speed: u8,
     use_xmp: bool,
-    trash_originals: bool,
+    keep_originals: bool,
     outdir: Option<&Path>,
     move_originals: Option<&Path>,
     progress: &Mutex<Progress>,
@@ -628,7 +632,7 @@ fn process_file(
         let dest = dir.join(path.file_name().unwrap_or_default());
         fs::rename(path, &dest)
             .with_context(|| format!("Failed to move {} → {}", path.display(), dest.display()))?;
-    } else if trash_originals {
+    } else if !keep_originals {
         trash_file(path)?;
     }
 
@@ -726,7 +730,7 @@ fn main() -> Result<()> {
                 args.quality,
                 args.speed,
                 args.xmp,
-                args.trash,
+                args.keep,
                 args.outdir.as_deref(),
                 args.move_originals.as_deref(),
                 &progress,

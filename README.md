@@ -31,6 +31,8 @@ avify [OPTIONS] [FILES]...
 
 If no files are given, converts all supported images in the current directory.
 
+> **Warning:** each original is trashed once its AVIF is written successfully. Pass `-k, --keep` to keep originals.
+
 ### Options
 
 | Flag | Description | Default |
@@ -39,7 +41,7 @@ If no files are given, converts all supported images in the current directory.
 | `-s, --speed` | Encoding speed (1-10, higher = faster) | 10 |
 | `-o, --outdir` | Output directory for AVIF files | same as input |
 | `-m, --move-originals` | Move originals to this directory after conversion | |
-| `-t, --trash` | Trash originals after conversion (macOS) | |
+| `-k, --keep` | Keep originals (default trashes each on success, macOS) | |
 | `-x, --xmp` | Apply Lightroom XMP sidecar edits | |
 
 ### Examples
