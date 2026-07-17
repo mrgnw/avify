@@ -55,7 +55,11 @@ brew install ffmpeg
 
 avify probes `PATH` and the homebrew locations for an ffmpeg with `libsvtav1`; if none has it, it falls back to slow libaom with a warning. `--quality`/`--speed` do not affect video. Videos encode one at a time (SVT-AV1 already uses all cores). AV1 may not preview in QuickLook on pre-M3 Macs.
 
-If a conversion (image or video) is not smaller than the original, the output is discarded and the original kept — already-compressed files often grow when re-encoded.
+If a conversion (image or video) is not smaller than the original, the output is discarded and the original kept — already-compressed files often grow when re-encoded. Kept originals are tagged with a `com.avify.keep` xattr so later runs skip them instead of re-encoding; retry one with:
+
+```sh
+xattr -d com.avify.keep file.mp4
+```
 
 ### Examples
 
