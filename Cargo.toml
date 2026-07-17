@@ -8,6 +8,7 @@ repository = "https://github.com/mrgnw/avify"
 keywords = ["avif", "image", "converter", "raw", "heic"]
 categories = ["command-line-utilities", "multimedia::images"]
 readme = "README.md"
+exclude = ["analysis/"]
 
 [features]
 default = []
