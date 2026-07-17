@@ -1,0 +1,155 @@
+[
+ {
+  "name": "IMG_2272.MOV",
+  "codec": "h264",
+  "res": "3840x2160",
+  "dur": 4.566667,
+  "orig": 14631522,
+  "time": 2.85,
+  "av1": 8357786
+ },
+ {
+  "name": "Screen Recording 2026-04-27 at 2.59.37\u202fPM.mov",
+  "codec": "h264",
+  "res": "1032x418",
+  "dur": 3.301667,
+  "orig": 45022,
+  "time": 0.08,
+  "av1": 40244
+ },
+ {
+  "name": "Screen Recording 2026-04-28 at 3.18.21\u202fPM.mov",
+  "codec": "h264",
+  "res": "3210x2046",
+  "dur": 19.661667,
+  "orig": 38670931,
+  "time": 5.38,
+  "av1": 2687103
+ },
+ {
+  "name": "Screen Recording 2026-05-14 at 12.16.33\u202fPM.mov",
+  "codec": "h264",
+  "res": "1212x982",
+  "dur": 3.916667,
+  "orig": 539574,
+  "time": 0.19,
+  "av1": 187713
+ },
+ {
+  "name": "Screen Recording 2026-05-15 at 11.37.05.mov",
+  "codec": "h264",
+  "res": "510x448",
+  "dur": 2.783333,
+  "orig": 117999,
+  "time": 0.07,
+  "av1": 48341
+ },
+ {
+  "name": "Screen Recording 2026-06-01 at 23.41.09.mov",
+  "codec": "h264",
+  "res": "1582x498",
+  "dur": 1.316667,
+  "orig": 248334,
+  "time": 0.16,
+  "av1": 66865
+ },
+ {
+  "name": "Screen Recording 2026-06-01 at 23.42.02.mov",
+  "codec": "h264",
+  "res": "1582x498",
+  "dur": 8.933333,
+  "orig": 1336407,
+  "time": 0.29,
+  "av1": 266826
+ },
+ {
+  "name": "Screen Recording 2026-06-06 at 00.12.40.mov",
+  "codec": "h264",
+  "res": "1582x498",
+  "dur": 7.383333,
+  "orig": 19042,
+  "time": 0.1,
+  "av1": 18378
+ },
+ {
+  "name": "Screen Recording 2026-06-10 at 17.02.50.mov",
+  "codec": "h264",
+  "res": "1722x802",
+  "dur": 5.96,
+  "orig": 4252339,
+  "time": 0.39,
+  "av1": 955028
+ },
+ {
+  "name": "Screen Recording 2026-06-10 at 4.26.48\u202fPM.mov",
+  "codec": "h264",
+  "res": "682x504",
+  "dur": 54.086667,
+  "orig": 6872799,
+  "time": 1.38,
+  "av1": 1515459
+ },
+ {
+  "name": "Screen Recording 2026-06-10 at 4.27.49\u202fPM.mov",
+  "codec": "h264",
+  "res": "682x504",
+  "dur": 22.625,
+  "orig": 5476074,
+  "time": 0.73,
+  "av1": 1859898
+ },
+ {
+  "name": "Screen Recording 2026-06-10 at 4.56.49\u202fPM.mov",
+  "codec": "h264",
+  "res": "684x466",
+  "dur": 62.906667,
+  "orig": 4978589,
+  "time": 1.48,
+  "av1": 664734
+ },
+ {
+  "name": "Screen Recording 2026-07-02 at 21.16.30.mov",
+  "codec": "h264",
+  "res": "1498x406",
+  "dur": 3.081667,
+  "orig": 353010,
+  "time": 0.19,
+  "av1": 111534
+ },
+ {
+  "name": "Screen Recording 2026-07-06 at 4.57.46\u202fPM.mov",
+  "codec": "h264",
+  "res": "1718x1478",
+  "dur": 17.446667,
+  "orig": 8737532,
+  "time": 1.51,
+  "av1": 2421064
+ },
+ {
+  "name": "Screen Recording 2026-07-08 at 09.37.24.mov",
+  "codec": "h264",
+  "res": "2672x1436",
+  "dur": 29.746667,
+  "orig": 21853815,
+  "time": 4.76,
+  "av1": 3914679
+ },
+ {
+  "name": "Screen Recording 2026-07-15 at 1.15.05\u202fAM.mov",
+  "codec": "h264",
+  "res": "4072x2518",
+  "dur": 118.695,
+  "orig": 228943049,
+  "time": 44.71,
+  "av1": 20584039
+ },
+ {
+  "name": "Screen Recording 2026-07-16 at 7.27.01\u202fPM.mov",
+  "codec": "h264",
+  "res": "1754x1648",
+  "dur": 9.211667,
+  "orig": 5510997,
+  "time": 1.19,
+  "av1": 1139186
+ }
+]
