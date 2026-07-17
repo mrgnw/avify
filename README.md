@@ -47,7 +47,15 @@ If no files are given, converts all supported images in the current directory.
 
 ### Video (`--video`)
 
-Off by default; images-only. With `--video`, video files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) via `ffmpeg`/libaom. `--quality`/`--speed` map to crf/cpu-used. Software encode only (no AV1 hardware acceleration on macOS) — expect it to be slow, and note AV1 may not preview in QuickLook on pre-M3 Macs.
+Off by default; images-only. With `--video`, video files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) using SVT-AV1 (`-preset 10 -crf 32` — on screen recordings: ~87% smaller, faster than realtime, visually transparent). Requires `ffmpeg` with `libsvtav1`:
+
+```sh
+brew install ffmpeg
+```
+
+avify probes `PATH` and the homebrew locations for an ffmpeg with `libsvtav1`; if none has it, it falls back to slow libaom with a warning. `--quality`/`--speed` do not affect video. Videos encode one at a time (SVT-AV1 already uses all cores). AV1 may not preview in QuickLook on pre-M3 Macs.
+
+If a conversion (image or video) is not smaller than the original, the output is discarded and the original kept — already-compressed files often grow when re-encoded.
 
 ### Examples
 

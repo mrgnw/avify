@@ -63,6 +63,7 @@ enum Status {
     Pending,
     Processing,
     Done { orig_bytes: u64, avif_bytes: usize },
+    Kept { orig_bytes: u64, avif_bytes: usize },
     Failed(String),
 }
 
@@ -114,13 +115,30 @@ impl Progress {
         // Flush completed files at the front (sequential, never redrawn)
         while self.flushed < total {
             match &self.statuses[self.flushed] {
-                Status::Done { avif_bytes, .. } => {
+                Status::Done {
+                    orig_bytes,
+                    avif_bytes,
+                } => {
                     let n = self.flushed + 1;
-                    let kb = avif_bytes / 1024;
                     write!(
                         out,
-                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} → {kb}KB\x1b[0m\n",
-                        self.names[self.flushed]
+                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} {}\x1b[0m\n",
+                        self.names[self.flushed],
+                        fmt_savings(*orig_bytes, *avif_bytes as u64)
+                    )
+                    .ok();
+                    self.flushed += 1;
+                }
+                Status::Kept {
+                    orig_bytes,
+                    avif_bytes,
+                } => {
+                    let n = self.flushed + 1;
+                    write!(
+                        out,
+                        "\x1b[2K\x1b[33m{n:>width$}/{total} {} {} — kept original\x1b[0m\n",
+                        self.names[self.flushed],
+                        fmt_savings(*orig_bytes, *avif_bytes as u64)
                     )
                     .ok();
                     self.flushed += 1;
@@ -148,12 +166,26 @@ impl Progress {
             let n = i + 1;
             let (color, text) = match &self.statuses[i] {
                 Status::Processing => ("33", format!("{n:>width$}/{total} {} →", self.names[i])),
-                Status::Done { avif_bytes, .. } => (
+                Status::Done {
+                    orig_bytes,
+                    avif_bytes,
+                } => (
                     "32",
                     format!(
-                        "{n:>width$}/{total} {} → {}KB",
+                        "{n:>width$}/{total} {} {}",
                         self.names[i],
-                        avif_bytes / 1024
+                        fmt_savings(*orig_bytes, *avif_bytes as u64)
+                    ),
+                ),
+                Status::Kept {
+                    orig_bytes,
+                    avif_bytes,
+                } => (
+                    "33",
+                    format!(
+                        "{n:>width$}/{total} {} {} — kept original",
+                        self.names[i],
+                        fmt_savings(*orig_bytes, *avif_bytes as u64)
                     ),
                 ),
                 Status::Failed(e) => (
@@ -174,6 +206,23 @@ impl Progress {
         self.active_lines = active;
         out.flush().ok();
     }
+}
+
+fn fmt_size(bytes: u64) -> String {
+    if bytes > 1_048_576 {
+        format!("{:.1}MB", bytes as f64 / 1_048_576.0)
+    } else {
+        format!("{}KB", bytes / 1024)
+    }
+}
+
+// "12.3MB → -88% → 1.5MB"; positive % means the file grew
+fn fmt_savings(orig: u64, new: u64) -> String {
+    if orig == 0 {
+        return format!("→ {}", fmt_size(new));
+    }
+    let pct = (new as i64 - orig as i64) * 100 / orig as i64;
+    format!("{} → {pct:+}% → {}", fmt_size(orig), fmt_size(new))
 }
 
 fn term_cols() -> Option<usize> {
@@ -197,17 +246,23 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_one_row, is_video, quality_to_crf};
+    use super::{fit_one_row, fmt_savings, is_video};
     use std::path::Path;
 
     #[test]
-    fn video_detection_and_crf_mapping() {
+    fn savings_line_shows_orig_ratio_final() {
+        assert_eq!(fmt_savings(10_485_760, 2_097_152), "10.0MB → -80% → 2.0MB");
+        assert_eq!(fmt_savings(102_400, 204_800), "100KB → +100% → 200KB");
+        assert_eq!(fmt_savings(0, 1024), "→ 1KB");
+    }
+
+    #[test]
+    fn video_detection() {
         assert!(is_video(Path::new("clip.MOV")));
         assert!(is_video(Path::new("rec.mp4")));
         assert!(!is_video(Path::new("photo.png")));
-        assert_eq!(quality_to_crf(100.0), 0);
-        assert_eq!(quality_to_crf(0.0), 63);
-        assert_eq!(quality_to_crf(80.0), 13);
+        assert!(!is_video(Path::new("rec.av1.mp4")));
+        assert!(!is_video(Path::new("REC.AV1.MP4")));
     }
 
     #[test]
@@ -534,6 +589,12 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
 const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi"];
 
 fn is_video(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.to_ascii_lowercase().ends_with(".av1.mp4") {
+        return false;
+    }
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| VIDEO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
@@ -551,39 +612,90 @@ fn video_out_path(path: &Path, outdir: Option<&Path>) -> PathBuf {
     }
 }
 
-// quality 0-100 (higher = better) maps to AV1 crf 63-0 (lower = better)
-fn quality_to_crf(quality: f32) -> u32 {
-    ((100.0 - quality.clamp(0.0, 100.0)) * 63.0 / 100.0).round() as u32
+struct VideoEncoder {
+    ffmpeg: PathBuf,
+    svt: bool,
 }
 
-// ponytail: shells out to ffmpeg/libaom (software AV1, no HW encode on macOS).
-// speed maps to cpu-used (higher = faster).
-fn transcode_video(src: &Path, dst: &Path, quality: f32, speed: u8) -> Result<u64> {
-    let crf = quality_to_crf(quality);
-    let cpu_used = speed.min(8);
-    let out = std::process::Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-i"])
-        .arg(src)
-        .args([
+// Prefer an ffmpeg with libsvtav1 (fast); PATH builds without it (e.g. tessus)
+// only have slow libaom, so also probe the homebrew locations directly.
+fn detect_video_encoder() -> Result<VideoEncoder> {
+    let candidates = [
+        "ffmpeg",
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ];
+    let mut fallback: Option<PathBuf> = None;
+    for cand in candidates {
+        let Ok(out) = std::process::Command::new(cand)
+            .args(["-hide_banner", "-encoders"])
+            .output()
+        else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        let encoders = String::from_utf8_lossy(&out.stdout);
+        if encoders.contains("libsvtav1") {
+            return Ok(VideoEncoder {
+                ffmpeg: cand.into(),
+                svt: true,
+            });
+        }
+        if fallback.is_none() && encoders.contains("libaom-av1") {
+            fallback = Some(cand.into());
+        }
+    }
+    if let Some(ffmpeg) = fallback {
+        eprintln!(
+            "\x1b[33mwarning: ffmpeg without libsvtav1 — using slow libaom (brew install ffmpeg for SVT-AV1)\x1b[0m"
+        );
+        return Ok(VideoEncoder { ffmpeg, svt: false });
+    }
+    anyhow::bail!(
+        "--video requires ffmpeg with an AV1 encoder\n\
+         \n\
+         \x1b[36m  brew install ffmpeg\x1b[0m"
+    )
+}
+
+// SVT-AV1 parallelizes internally across all cores; concurrent instances
+// oversubscribe and can deadlock in svt_av1_enc_send_picture. One at a time.
+static VIDEO_ENCODE_LOCK: Mutex<()> = Mutex::new(());
+
+// ponytail: fixed crf 32 / preset 10 — validated on real screen recordings
+// (87% smaller, 5.7x realtime, VMAF 97). Expose knobs if tuning ever matters.
+fn transcode_video(src: &Path, dst: &Path, enc: &VideoEncoder) -> Result<u64> {
+    let _serial = VIDEO_ENCODE_LOCK.lock().unwrap();
+    let vargs: &[&str] = if enc.svt {
+        &["-c:v", "libsvtav1", "-crf", "32", "-preset", "10"]
+    } else {
+        &[
             "-c:v",
             "libaom-av1",
             "-crf",
-            &crf.to_string(),
+            "32",
             "-b:v",
             "0",
             "-cpu-used",
-            &cpu_used.to_string(),
+            "8",
             "-row-mt",
             "1",
             "-pix_fmt",
             "yuv420p",
-            "-c:a",
-            "copy",
-        ])
+        ]
+    };
+    let out = std::process::Command::new(&enc.ffmpeg)
+        .args(["-y", "-loglevel", "error", "-i"])
+        .arg(src)
+        .args(vargs)
+        .args(["-c:a", "copy"])
         .arg(dst)
         .output()
-        .context("Failed to run ffmpeg (is it installed and on PATH?)")?;
+        .context("Failed to run ffmpeg")?;
     if !out.status.success() {
+        fs::remove_file(dst).ok();
         anyhow::bail!(
             "ffmpeg failed: {}",
             String::from_utf8_lossy(&out.stderr).trim()
@@ -651,7 +763,7 @@ fn process_file(
     quality: f32,
     speed: u8,
     use_xmp: bool,
-    use_video: bool,
+    video_enc: Option<&VideoEncoder>,
     keep_originals: bool,
     outdir: Option<&Path>,
     move_originals: Option<&Path>,
@@ -667,13 +779,29 @@ fn process_file(
 
     let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-    let (out_path, out_bytes) = if use_video && is_video(path) {
-        let out = video_out_path(path, outdir);
-        let bytes = transcode_video(path, &out, quality, speed)?;
-        (out, bytes as usize)
-    } else {
-        encode_image(path, quality, speed, use_xmp, outdir)?
+    let (out_path, out_bytes) = match video_enc {
+        Some(enc) if is_video(path) => {
+            let out = video_out_path(path, outdir);
+            let bytes = transcode_video(path, &out, enc)?;
+            (out, bytes as usize)
+        }
+        _ => encode_image(path, quality, speed, use_xmp, outdir)?,
     };
+
+    if orig_bytes > 0 && out_bytes as u64 >= orig_bytes {
+        fs::remove_file(&out_path)
+            .with_context(|| format!("Failed to remove {}", out_path.display()))?;
+        let mut p = progress.lock().unwrap();
+        p.set(
+            idx,
+            Status::Kept {
+                orig_bytes,
+                avif_bytes: out_bytes,
+            },
+        );
+        p.render();
+        return Ok(());
+    }
 
     preserve_timestamps(path, &out_path).ok();
 
@@ -771,12 +899,9 @@ fn collect_images_from_dir(dir: &Path, include_video: bool) -> Result<Vec<PathBu
             p.is_file()
                 && p.extension()
                     .and_then(|e| e.to_str())
-                    .map(|e| {
-                        let e = e.to_ascii_lowercase();
-                        SUPPORTED_EXTENSIONS.contains(&e.as_str())
-                            || (include_video && VIDEO_EXTENSIONS.contains(&e.as_str()))
-                    })
+                    .map(|e| SUPPORTED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
                     .unwrap_or(false)
+                || (include_video && is_video(p))
         })
         .collect();
     files.sort();
@@ -817,6 +942,12 @@ fn main() -> Result<()> {
         fs::create_dir_all(dir).context("Failed to create originals directory")?;
     }
 
+    let video_enc = if args.video {
+        Some(detect_video_encoder()?)
+    } else {
+        None
+    };
+
     let progress = Mutex::new(Progress::new(&args.files));
     let next = AtomicUsize::new(0);
 
@@ -833,7 +964,7 @@ fn main() -> Result<()> {
                 args.quality,
                 args.speed,
                 args.xmp,
-                args.video,
+                video_enc.as_ref(),
                 args.keep,
                 args.outdir.as_deref(),
                 args.move_originals.as_deref(),
@@ -848,7 +979,8 @@ fn main() -> Result<()> {
     let failed = {
         let p = progress.lock().unwrap();
         // Don't re-render, just print summary
-        let (mut orig_total, mut avif_total, mut count, mut failed) = (0u64, 0u64, 0u64, 0u64);
+        let (mut orig_total, mut avif_total, mut count, mut kept, mut failed) =
+            (0u64, 0u64, 0u64, 0u64, 0u64);
         for status in &p.statuses {
             match status {
                 Status::Done {
@@ -859,36 +991,30 @@ fn main() -> Result<()> {
                     avif_total += *avif_bytes as u64;
                     count += 1;
                 }
+                Status::Kept { .. } => kept += 1,
                 Status::Failed(_) => failed += 1,
                 _ => {}
             }
         }
         drop(p);
 
+        let mut out = io::stderr().lock();
         if count > 0 && orig_total > 0 {
             let saved = orig_total.saturating_sub(avif_total);
             let pct = saved * 100 / orig_total;
-            let mut out = io::stderr().lock();
-            if orig_total > 1_048_576 {
-                write!(
-                    out,
-                    "{count} files: {:.1}MB → {:.1}MB (saved {:.1}MB, {pct}%)\n",
-                    orig_total as f64 / 1_048_576.0,
-                    avif_total as f64 / 1_048_576.0,
-                    saved as f64 / 1_048_576.0,
-                )
-                .ok();
-            } else {
-                write!(
-                    out,
-                    "{count} files: {}KB → {}KB (saved {}KB, {pct}%)\n",
-                    orig_total / 1024,
-                    avif_total / 1024,
-                    saved / 1024,
-                )
-                .ok();
-            }
+            write!(
+                out,
+                "{count} files: {} → {} (saved {}, {pct}%)\n",
+                fmt_size(orig_total),
+                fmt_size(avif_total),
+                fmt_size(saved),
+            )
+            .ok();
         }
+        if kept > 0 {
+            write!(out, "{kept} file(s) kept — conversion was not smaller\n").ok();
+        }
+        drop(out);
         failed
     };
 
