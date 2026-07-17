@@ -246,8 +246,18 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_one_row, fmt_savings, is_video};
+    use super::{fit_one_row, fmt_savings, has_keep_marker, is_video, set_keep_marker};
     use std::path::Path;
+
+    #[test]
+    fn keep_marker_round_trip() {
+        let f = std::env::temp_dir().join("avify_keep_marker_test");
+        std::fs::write(&f, b"x").unwrap();
+        assert!(!has_keep_marker(&f));
+        set_keep_marker(&f);
+        assert!(has_keep_marker(&f));
+        std::fs::remove_file(&f).unwrap();
+    }
 
     #[test]
     fn savings_line_shows_orig_ratio_final() {
@@ -601,6 +611,49 @@ fn is_video(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+// Set on originals whose conversion came out bigger, so later runs skip
+// them without re-encoding. Local-only: iCloud eviction can strip it, which
+// just costs one wasted re-encode. Clear with: xattr -d com.avify.keep <file>
+const KEEP_XATTR: &std::ffi::CStr = c"com.avify.keep";
+
+fn path_cstring(path: &Path) -> Option<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::CString::new(path.as_os_str().as_bytes()).ok()
+}
+
+fn has_keep_marker(path: &Path) -> bool {
+    let Some(c) = path_cstring(path) else {
+        return false;
+    };
+    let n = unsafe {
+        libc::getxattr(
+            c.as_ptr(),
+            KEEP_XATTR.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+        )
+    };
+    n >= 0
+}
+
+fn set_keep_marker(path: &Path) {
+    let Some(c) = path_cstring(path) else {
+        return;
+    };
+    unsafe {
+        libc::setxattr(
+            c.as_ptr(),
+            KEEP_XATTR.as_ptr(),
+            b"1".as_ptr().cast(),
+            1,
+            0,
+            0,
+        );
+    }
+}
+
 fn video_out_path(path: &Path, outdir: Option<&Path>) -> PathBuf {
     let name = format!(
         "{}.av1.mp4",
@@ -791,6 +844,7 @@ fn process_file(
     if orig_bytes > 0 && out_bytes as u64 >= orig_bytes {
         fs::remove_file(&out_path)
             .with_context(|| format!("Failed to remove {}", out_path.display()))?;
+        set_keep_marker(path);
         let mut p = progress.lock().unwrap();
         p.set(
             idx,
@@ -933,6 +987,18 @@ fn main() -> Result<()> {
         if args.files.is_empty() {
             anyhow::bail!("No image files found in given paths");
         }
+    }
+
+    let before = args.files.len();
+    args.files.retain(|p| !has_keep_marker(p));
+    let marked = before - args.files.len();
+    if marked > 0 {
+        eprintln!(
+            "\x1b[33m{marked} file(s) skipped — previously kept as smaller than conversion (xattr -d com.avify.keep to retry)\x1b[0m"
+        );
+    }
+    if args.files.is_empty() {
+        return Ok(());
     }
 
     if let Some(ref dir) = args.outdir {
