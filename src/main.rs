@@ -1034,9 +1034,9 @@ fn main() -> Result<()> {
     let failed = {
         let p = progress.lock().unwrap();
         // Don't re-render, just print summary
-        let (mut orig_total, mut avif_total, mut count, mut kept, mut failed) =
-            (0u64, 0u64, 0u64, 0u64, 0u64);
-        for status in &p.statuses {
+        let (mut orig_total, mut avif_total, mut count, mut kept) = (0u64, 0u64, 0u64, 0u64);
+        let mut failures: Vec<(&str, &str)> = Vec::new();
+        for (idx, status) in p.statuses.iter().enumerate() {
             match status {
                 Status::Done {
                     orig_bytes,
@@ -1047,11 +1047,10 @@ fn main() -> Result<()> {
                     count += 1;
                 }
                 Status::Kept { .. } => kept += 1,
-                Status::Failed(_) => failed += 1,
+                Status::Failed(err) => failures.push((p.names[idx].as_str(), err.as_str())),
                 _ => {}
             }
         }
-        drop(p);
 
         let mut out = io::stderr().lock();
         if count > 0 && orig_total > 0 {
@@ -1069,12 +1068,18 @@ fn main() -> Result<()> {
         if kept > 0 {
             write!(out, "{kept} file(s) kept — conversion was not smaller\n").ok();
         }
+        if !failures.is_empty() {
+            write!(out, "{} file(s) failed:\n", failures.len()).ok();
+            for (name, err) in &failures {
+                write!(out, "  {name}: {err}\n").ok();
+            }
+        }
         drop(out);
-        failed
+        failures.len()
     };
 
     if failed > 0 {
-        anyhow::bail!("{failed} file(s) failed");
+        std::process::exit(1);
     }
     Ok(())
 }
