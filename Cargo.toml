@@ -28,6 +28,7 @@ libc = "0.2"
 libheif-rs = { version = "2.7", optional = true }
 jxl-oxide = { version = "0.12.5", default-features = false }
 psd = "0.3.5"
+trash = "5.2.6"
 
 [profile.dev.package.rav1e]
 opt-level = 3

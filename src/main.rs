@@ -787,26 +787,15 @@ fn preserve_timestamps(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn trash_file(path: &Path) -> Result<()> {
-    let posix = path
-        .canonicalize()
-        .with_context(|| format!("Failed to resolve {}", path.display()))?
-        .to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    let script = format!(
-        "tell application \"Finder\" to delete (POSIX file \"{}\" as alias)",
-        posix
-    );
-    let status = std::process::Command::new("osascript")
-        .args(["-e", &script])
-        .output()
-        .context("Failed to run osascript")?;
-    if !status.status.success() {
-        anyhow::bail!(
-            "Trash failed: {}",
-            String::from_utf8_lossy(&status.stderr).trim()
-        );
+    // ponytail: NsFileManager instead of Finder AppleScript — same trash, no crumple sound
+    let mut ctx = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
     }
+    ctx.delete(path)
+        .with_context(|| format!("Trash failed for {}", path.display()))?;
     Ok(())
 }
 
