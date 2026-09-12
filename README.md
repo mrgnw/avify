@@ -23,6 +23,12 @@ brew install libheif
 cargo install avify --features heic
 ```
 
+Why libheif is not on by default: there is no pure-Rust HEVC decoder. `libheif-rs` can
+compile libheif from vendored source (`embedded-libheif`), but that needs cmake and a C++
+toolchain on every installer's machine, and the HEVC decode still links a system `libde265`.
+Without it the build succeeds and every HEIC fails at runtime. Cargo features are compile-time
+flags, so they cannot be enabled after install without a full rebuild.
+
 ## Usage
 
 ```
