@@ -287,24 +287,17 @@ mod tests {
     }
 }
 
-#[cfg(not(feature = "heic"))]
+#[cfg(all(not(feature = "heic"), not(target_os = "macos")))]
 const HEIC_UNSUPPORTED: &str = "HEIC support not compiled in";
 
-#[cfg(not(feature = "heic"))]
-const HEIC_HINT: &str = "\nHEIC needs libheif. Reinstall with:\n\
+#[cfg(all(not(feature = "heic"), not(target_os = "macos")))]
+const HEIC_HINT: &str = "\nHEIC needs libheif. Install it (e.g. apt install libheif-dev), then:\n\
      \n\
-     \x1b[36m  brew install libheif && cargo install avify --features heic\x1b[0m\n\
-     \n\
-     Or convert them first with sips:\n\
-     \n\
-     \x1b[36m  for f in *.heic; do sips -s format png \"$f\" --out \"${f%.heic}.png\"; done\x1b[0m\n";
+     \x1b[36m  cargo install avify --features heic\x1b[0m\n";
 
 enum ImageFormat {
     Raw,
-    #[cfg(feature = "heic")]
     Heic,
-    #[cfg(not(feature = "heic"))]
-    HeicUnsupported,
     Jxl,
     Psd,
     Standard,
@@ -338,10 +331,7 @@ fn sniff_format(path: &Path) -> Option<ImageFormat> {
         return Some(ImageFormat::Standard);
     }
     if &buf[4..8] == b"ftyp" {
-        #[cfg(feature = "heic")]
         return Some(ImageFormat::Heic);
-        #[cfg(not(feature = "heic"))]
-        return Some(ImageFormat::HeicUnsupported);
     }
     if buf.starts_with(&[0xFF, 0x0A])
         || buf.starts_with(&[0x00, 0x00, 0x00, 0x0C, b'J', b'X', b'L', b' '])
@@ -373,10 +363,7 @@ fn classify(path: &Path) -> ImageFormat {
     }
 
     match ext.as_deref() {
-        #[cfg(feature = "heic")]
         Some("heic" | "heif") => ImageFormat::Heic,
-        #[cfg(not(feature = "heic"))]
-        Some("heic" | "heif") => ImageFormat::HeicUnsupported,
         Some("jxl") => ImageFormat::Jxl,
         Some("psd") => ImageFormat::Psd,
         Some("png" | "webp") => ImageFormat::StandardAlpha,
@@ -482,6 +469,39 @@ fn decode_heic(path: &Path) -> Result<DecodedImage> {
     }
 
     Ok(DecodedImage::Rgb(ImgVec::new(pixels, width, height)))
+}
+
+#[cfg(all(not(feature = "heic"), target_os = "macos"))]
+fn decode_heic(path: &Path) -> Result<DecodedImage> {
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("avify-{}-{seq}.tiff", std::process::id()));
+
+    let out = std::process::Command::new("sips")
+        .args(["-s", "format", "tiff"])
+        .arg(path)
+        .arg("--out")
+        .arg(&tmp)
+        .output()
+        .context("Failed to run sips")?;
+    if !out.status.success() {
+        let _ = fs::remove_file(&tmp);
+        let msg = String::from_utf8_lossy(&out.stderr);
+        let reason = msg
+            .lines()
+            .find(|l| l.starts_with("Error:"))
+            .unwrap_or("unknown error");
+        anyhow::bail!("sips failed: {reason}");
+    }
+
+    let img = decode_standard(&tmp, false);
+    let _ = fs::remove_file(&tmp);
+    img
+}
+
+#[cfg(all(not(feature = "heic"), not(target_os = "macos")))]
+fn decode_heic(_path: &Path) -> Result<DecodedImage> {
+    anyhow::bail!("{HEIC_UNSUPPORTED}")
 }
 
 fn decode_jxl(path: &Path) -> Result<DecodedImage> {
@@ -899,10 +919,7 @@ fn encode_image(
 
     let result = match classify(path) {
         ImageFormat::Raw => decode_raw(path, use_xmp),
-        #[cfg(feature = "heic")]
         ImageFormat::Heic => decode_heic(path),
-        #[cfg(not(feature = "heic"))]
-        ImageFormat::HeicUnsupported => anyhow::bail!("{HEIC_UNSUPPORTED}"),
         ImageFormat::Jxl => decode_jxl(path),
         ImageFormat::Psd => decode_psd(path),
         ImageFormat::StandardAlpha => decode_standard(path, true),
@@ -1064,7 +1081,7 @@ fn main() -> Result<()> {
             for (name, err) in &failures {
                 write!(out, "  {name}: {err}\n").ok();
             }
-            #[cfg(not(feature = "heic"))]
+            #[cfg(all(not(feature = "heic"), not(target_os = "macos")))]
             if failures.iter().any(|(_, err)| *err == HEIC_UNSUPPORTED) {
                 write!(out, "{HEIC_HINT}").ok();
             }
