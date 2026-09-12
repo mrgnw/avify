@@ -287,6 +287,18 @@ mod tests {
     }
 }
 
+#[cfg(not(feature = "heic"))]
+const HEIC_UNSUPPORTED: &str = "HEIC support not compiled in";
+
+#[cfg(not(feature = "heic"))]
+const HEIC_HINT: &str = "\nHEIC needs libheif. Reinstall with:\n\
+     \n\
+     \x1b[36m  brew install libheif && cargo install avify --features heic\x1b[0m\n\
+     \n\
+     Or convert them first with sips:\n\
+     \n\
+     \x1b[36m  for f in *.heic; do sips -s format png \"$f\" --out \"${f%.heic}.png\"; done\x1b[0m\n";
+
 enum ImageFormat {
     Raw,
     #[cfg(feature = "heic")]
@@ -890,21 +902,7 @@ fn encode_image(
         #[cfg(feature = "heic")]
         ImageFormat::Heic => decode_heic(path),
         #[cfg(not(feature = "heic"))]
-        ImageFormat::HeicUnsupported => {
-            let name = path.file_stem().unwrap_or_default().to_string_lossy();
-            let path_str = path.display();
-            anyhow::bail!(
-                "HEIC support not compiled in\n\
-                 \n\
-                 Convert first with sips:\n\
-                 \n\
-                 \x1b[36m  sips -s format png \"{path_str}\" --out \"{name}.png\"\x1b[0m\n\
-                 \n\
-                 Or install libheif for native support:\n\
-                 \n\
-                 \x1b[36m  brew install libheif && cargo install avify\x1b[0m"
-            );
-        }
+        ImageFormat::HeicUnsupported => anyhow::bail!("{HEIC_UNSUPPORTED}"),
         ImageFormat::Jxl => decode_jxl(path),
         ImageFormat::Psd => decode_psd(path),
         ImageFormat::StandardAlpha => decode_standard(path, true),
@@ -921,13 +919,6 @@ fn encode_image(
     Ok((out_path, avif_data.len()))
 }
 
-#[cfg(feature = "heic")]
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
-    "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl", "psd",
-];
-
-#[cfg(not(feature = "heic"))]
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "raw", "rw2", "pef", "srw", "x3f", "heic",
     "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif", "tga", "jxl", "psd",
@@ -1072,6 +1063,10 @@ fn main() -> Result<()> {
             write!(out, "{} file(s) failed:\n", failures.len()).ok();
             for (name, err) in &failures {
                 write!(out, "  {name}: {err}\n").ok();
+            }
+            #[cfg(not(feature = "heic"))]
+            if failures.iter().any(|(_, err)| *err == HEIC_UNSUPPORTED) {
+                write!(out, "{HEIC_HINT}").ok();
             }
         }
         drop(out);
