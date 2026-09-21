@@ -247,8 +247,8 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        fit_one_row, fmt_savings, has_keep_marker, has_multiple_gif_frames, is_video,
-        set_keep_marker, should_retry_gif_at_lower_quality,
+        fit_one_row, fmt_savings, has_keep_marker, has_multiple_gif_frames, image_quality,
+        is_video, set_keep_marker, should_retry_gif_at_lower_quality,
     };
     use image::{codecs::gif::GifEncoder, Frame, RgbaImage};
     use std::path::Path;
@@ -294,6 +294,23 @@ mod tests {
     fn only_multi_frame_gifs_are_animations() {
         assert!(!has_multiple_gif_frames(&gif_with_frames(1)[..]));
         assert!(has_multiple_gif_frames(&gif_with_frames(2)[..]));
+    }
+
+    #[test]
+    fn lowers_quality_for_static_gifs_only() {
+        let temp = std::env::temp_dir();
+        let static_gif = temp.join(format!("avify-static-{}.gif", std::process::id()));
+        let animated_gif = temp.join(format!("avify-animated-{}.gif", std::process::id()));
+        std::fs::write(&static_gif, gif_with_frames(1)).unwrap();
+        std::fs::write(&animated_gif, gif_with_frames(2)).unwrap();
+
+        assert_eq!(image_quality(&static_gif, 80.0), 60.0);
+        assert_eq!(image_quality(&static_gif, 50.0), 50.0);
+        assert_eq!(image_quality(&animated_gif, 80.0), 80.0);
+        assert_eq!(image_quality(Path::new("photo.jpg"), 80.0), 80.0);
+
+        std::fs::remove_file(static_gif).unwrap();
+        std::fs::remove_file(animated_gif).unwrap();
     }
 
     #[test]
@@ -671,6 +688,7 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
 const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi"];
 const DEFAULT_VIDEO_CRF: u8 = 32;
 const GIF_RETRY_CRF: u8 = 45;
+const STATIC_GIF_QUALITY: f32 = 60.0;
 
 fn is_video(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -708,6 +726,14 @@ fn has_multiple_gif_frames<R: std::io::Read>(reader: R) -> bool {
     };
     let mut frames = decoder.into_frames();
     matches!(frames.next(), Some(Ok(_))) && matches!(frames.next(), Some(Ok(_)))
+}
+
+fn image_quality(path: &Path, quality: f32) -> f32 {
+    if is_gif(path) && !is_animated_gif(path) {
+        quality.min(STATIC_GIF_QUALITY)
+    } else {
+        quality
+    }
 }
 
 fn should_retry_gif_at_lower_quality(path: &Path, orig_bytes: u64, output_bytes: u64) -> bool {
@@ -931,7 +957,7 @@ fn process_file(
             let bytes = transcode_video(path, &out, enc, DEFAULT_VIDEO_CRF)?;
             (out, bytes as usize)
         }
-        _ => encode_image(path, quality, speed, use_xmp, outdir)?,
+        _ => encode_image(path, image_quality(path, quality), speed, use_xmp, outdir)?,
     };
 
     if let Some(enc) = video_enc {
