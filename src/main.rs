@@ -247,10 +247,22 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        fit_one_row, fmt_savings, has_keep_marker, is_video, set_keep_marker,
-        should_retry_gif_at_lower_quality,
+        fit_one_row, fmt_savings, has_keep_marker, has_multiple_gif_frames, is_video,
+        set_keep_marker, should_retry_gif_at_lower_quality,
     };
+    use image::{codecs::gif::GifEncoder, Frame, RgbaImage};
     use std::path::Path;
+
+    fn gif_with_frames(frame_count: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            for _ in 0..frame_count {
+                encoder.encode_frame(Frame::new(RgbaImage::new(1, 1))).unwrap();
+            }
+        }
+        bytes
+    }
 
     #[test]
     fn keep_marker_round_trip() {
@@ -273,10 +285,15 @@ mod tests {
     fn video_detection() {
         assert!(is_video(Path::new("clip.MOV")));
         assert!(is_video(Path::new("rec.mp4")));
-        assert!(is_video(Path::new("animation.GIF")));
         assert!(!is_video(Path::new("photo.png")));
         assert!(!is_video(Path::new("rec.av1.mp4")));
         assert!(!is_video(Path::new("REC.AV1.MP4")));
+    }
+
+    #[test]
+    fn only_multi_frame_gifs_are_animations() {
+        assert!(!has_multiple_gif_frames(&gif_with_frames(1)[..]));
+        assert!(has_multiple_gif_frames(&gif_with_frames(2)[..]));
     }
 
     #[test]
@@ -342,7 +359,7 @@ fn sniff_format(path: &Path) -> Option<ImageFormat> {
         return Some(ImageFormat::Standard);
     }
     if buf.starts_with(b"GIF87a") || buf.starts_with(b"GIF89a") {
-        return Some(ImageFormat::Standard);
+        return Some(ImageFormat::StandardAlpha);
     }
     if &buf[0..4] == b"RIFF" && &buf[8..12] == b"WEBP" {
         return Some(ImageFormat::StandardAlpha);
@@ -651,7 +668,7 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
     Ok(avif_file)
 }
 
-const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi", "gif"];
+const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi"];
 const DEFAULT_VIDEO_CRF: u8 = 32;
 const GIF_RETRY_CRF: u8 = 45;
 
@@ -661,6 +678,9 @@ fn is_video(path: &Path) -> bool {
     };
     if name.to_ascii_lowercase().ends_with(".av1.mp4") {
         return false;
+    }
+    if is_gif(path) {
+        return is_animated_gif(path);
     }
     path.extension()
         .and_then(|e| e.to_str())
@@ -672,6 +692,22 @@ fn is_gif(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("gif"))
+}
+
+fn is_animated_gif(path: &Path) -> bool {
+    fs::File::open(path)
+        .map(has_multiple_gif_frames)
+        .unwrap_or(false)
+}
+
+fn has_multiple_gif_frames<R: std::io::Read>(reader: R) -> bool {
+    use image::AnimationDecoder;
+
+    let Ok(decoder) = image::codecs::gif::GifDecoder::new(reader) else {
+        return false;
+    };
+    let mut frames = decoder.into_frames();
+    matches!(frames.next(), Some(Ok(_))) && matches!(frames.next(), Some(Ok(_)))
 }
 
 fn should_retry_gif_at_lower_quality(path: &Path, orig_bytes: u64, output_bytes: u64) -> bool {
