@@ -270,6 +270,7 @@ mod tests {
     fn video_detection() {
         assert!(is_video(Path::new("clip.MOV")));
         assert!(is_video(Path::new("rec.mp4")));
+        assert!(is_video(Path::new("animation.GIF")));
         assert!(!is_video(Path::new("photo.png")));
         assert!(!is_video(Path::new("rec.av1.mp4")));
         assert!(!is_video(Path::new("REC.AV1.MP4")));
@@ -628,7 +629,7 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
     Ok(avif_file)
 }
 
-const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi"];
+const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi", "gif"];
 
 fn is_video(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -1005,7 +1006,10 @@ fn main() -> Result<()> {
         fs::create_dir_all(dir).context("Failed to create originals directory")?;
     }
 
-    let video_enc = if args.video {
+    // GIFs are animations even though they are collected with image formats;
+    // always transcode them so their frames are preserved. Other video formats
+    // remain opt-in behind --video.
+    let video_enc = if args.video || args.files.iter().any(|path| is_video(path)) {
         Some(detect_video_encoder()?)
     } else {
         None
