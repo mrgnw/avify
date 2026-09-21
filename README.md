@@ -53,7 +53,7 @@ If no files are given, converts all supported images in the current directory.
 
 ### Video (`--video`)
 
-GIFs are always transcoded to AV1 video (`name.av1.mp4`) to preserve their animation. Other video files are opt-in: with `--video`, files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) using SVT-AV1 (`-preset 10 -crf 32` — on screen recordings: ~87% smaller, faster than realtime, visually transparent). Requires `ffmpeg` with `libsvtav1`:
+GIFs are always transcoded to AV1 video (`name.av1.mp4`) to preserve their animation. If the normal encode is larger than the GIF, avify retries at a lower bitrate before keeping the original. Other video files are opt-in: with `--video`, files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) using SVT-AV1 (`-preset 10 -crf 32` — on screen recordings: ~87% smaller, faster than realtime, visually transparent). Requires `ffmpeg` with `libsvtav1`:
 
 ```sh
 brew install ffmpeg
