@@ -246,7 +246,10 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_one_row, fmt_savings, has_keep_marker, is_video, set_keep_marker};
+    use super::{
+        fit_one_row, fmt_savings, has_keep_marker, is_video, set_keep_marker,
+        should_retry_gif_at_lower_quality,
+    };
     use std::path::Path;
 
     #[test]
@@ -274,6 +277,25 @@ mod tests {
         assert!(!is_video(Path::new("photo.png")));
         assert!(!is_video(Path::new("rec.av1.mp4")));
         assert!(!is_video(Path::new("REC.AV1.MP4")));
+    }
+
+    #[test]
+    fn retries_gif_only_when_the_initial_video_is_not_smaller() {
+        assert!(should_retry_gif_at_lower_quality(
+            Path::new("animation.gif"),
+            59_195,
+            115_220
+        ));
+        assert!(!should_retry_gif_at_lower_quality(
+            Path::new("animation.gif"),
+            59_195,
+            55_109
+        ));
+        assert!(!should_retry_gif_at_lower_quality(
+            Path::new("clip.mp4"),
+            59_195,
+            115_220
+        ));
     }
 
     #[test]
@@ -630,6 +652,8 @@ fn encode_avif(img: DecodedImage, quality: f32, speed: u8) -> Result<Vec<u8>> {
 }
 
 const VIDEO_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi", "gif"];
+const DEFAULT_VIDEO_CRF: u8 = 32;
+const GIF_RETRY_CRF: u8 = 45;
 
 fn is_video(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -642,6 +666,16 @@ fn is_video(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| VIDEO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+fn is_gif(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("gif"))
+}
+
+fn should_retry_gif_at_lower_quality(path: &Path, orig_bytes: u64, output_bytes: u64) -> bool {
+    is_gif(path) && orig_bytes > 0 && output_bytes >= orig_bytes
 }
 
 // Set on originals whose conversion came out bigger, so later runs skip
@@ -752,16 +786,17 @@ static VIDEO_ENCODE_LOCK: Mutex<()> = Mutex::new(());
 
 // ponytail: fixed crf 32 / preset 10 — validated on real screen recordings
 // (87% smaller, 5.7x realtime, VMAF 97). Expose knobs if tuning ever matters.
-fn transcode_video(src: &Path, dst: &Path, enc: &VideoEncoder) -> Result<u64> {
+fn transcode_video(src: &Path, dst: &Path, enc: &VideoEncoder, crf: u8) -> Result<u64> {
     let _serial = VIDEO_ENCODE_LOCK.lock().unwrap();
-    let vargs: &[&str] = if enc.svt {
-        &["-c:v", "libsvtav1", "-crf", "32", "-preset", "10"]
+    let crf = crf.to_string();
+    let vargs: Vec<&str> = if enc.svt {
+        vec!["-c:v", "libsvtav1", "-crf", &crf, "-preset", "10"]
     } else {
-        &[
+        vec![
             "-c:v",
             "libaom-av1",
             "-crf",
-            "32",
+            &crf,
             "-b:v",
             "0",
             "-cpu-used",
@@ -775,7 +810,7 @@ fn transcode_video(src: &Path, dst: &Path, enc: &VideoEncoder) -> Result<u64> {
     let out = std::process::Command::new(&enc.ffmpeg)
         .args(["-y", "-loglevel", "error", "-i"])
         .arg(src)
-        .args(vargs)
+        .args(&vargs)
         .args(["-c:a", "copy"])
         .arg(dst)
         .output()
@@ -854,14 +889,22 @@ fn process_file(
 
     let orig_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-    let (out_path, out_bytes) = match video_enc {
+    let (out_path, mut out_bytes) = match video_enc {
         Some(enc) if is_video(path) => {
             let out = video_out_path(path, outdir);
-            let bytes = transcode_video(path, &out, enc)?;
+            let bytes = transcode_video(path, &out, enc, DEFAULT_VIDEO_CRF)?;
             (out, bytes as usize)
         }
         _ => encode_image(path, quality, speed, use_xmp, outdir)?,
     };
+
+    if let Some(enc) = video_enc {
+        if should_retry_gif_at_lower_quality(path, orig_bytes, out_bytes as u64) {
+            fs::remove_file(&out_path)
+                .with_context(|| format!("Failed to remove {}", out_path.display()))?;
+            out_bytes = transcode_video(path, &out_path, enc, GIF_RETRY_CRF)? as usize;
+        }
+    }
 
     if orig_bytes > 0 && out_bytes as u64 >= orig_bytes {
         fs::remove_file(&out_path)
