@@ -1,6 +1,6 @@
 [package]
 name = "avify"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 description = "Batch convert images to AVIF — supports RAW, HEIC/HEIF, and standard formats with parallel encoding"
 license = "MIT"
@@ -26,7 +26,7 @@ rayon = "1"
 anyhow = "1"
 libc = "0.2"
 libheif-rs = { version = "2.7", optional = true }
-jxl-oxide = { version = "0.12.5", default-features = false }
+jxl-oxide = { version = "0.12.6", default-features = false }
 psd = "0.3.5"
 trash = "5.2.6"
 
