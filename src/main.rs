@@ -107,7 +107,7 @@ impl Progress {
         if self.active_lines > 0 {
             write!(out, "\x1b[{}A", self.active_lines).ok();
             for _ in 0..self.active_lines {
-                write!(out, "\x1b[2K\n").ok();
+                writeln!(out, "\x1b[2K").ok();
             }
             write!(out, "\x1b[{}A", self.active_lines).ok();
         }
@@ -120,9 +120,9 @@ impl Progress {
                     avif_bytes,
                 } => {
                     let n = self.flushed + 1;
-                    write!(
+                    writeln!(
                         out,
-                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} {}\x1b[0m\n",
+                        "\x1b[2K\x1b[32m{n:>width$}/{total} {} {}\x1b[0m",
                         self.names[self.flushed],
                         fmt_savings(*orig_bytes, *avif_bytes as u64)
                     )
@@ -134,9 +134,9 @@ impl Progress {
                     avif_bytes,
                 } => {
                     let n = self.flushed + 1;
-                    write!(
+                    writeln!(
                         out,
-                        "\x1b[2K\x1b[33m{n:>width$}/{total} {} {} — kept original\x1b[0m\n",
+                        "\x1b[2K\x1b[33m{n:>width$}/{total} {} {} — kept original\x1b[0m",
                         self.names[self.flushed],
                         fmt_savings(*orig_bytes, *avif_bytes as u64)
                     )
@@ -146,9 +146,9 @@ impl Progress {
                 Status::Failed(e) => {
                     let n = self.flushed + 1;
                     let e = e.clone();
-                    write!(
+                    writeln!(
                         out,
-                        "\x1b[2K\x1b[31m{n:>width$}/{total} {} FAIL: {e}\x1b[0m\n",
+                        "\x1b[2K\x1b[31m{n:>width$}/{total} {} FAIL: {e}\x1b[0m",
                         self.names[self.flushed]
                     )
                     .ok();
@@ -194,9 +194,9 @@ impl Progress {
                 ),
                 Status::Pending => break,
             };
-            write!(
+            writeln!(
                 out,
-                "\x1b[2K\x1b[{color}m{}\x1b[0m\n",
+                "\x1b[2K\x1b[{color}m{}\x1b[0m",
                 fit_one_row(&text, cols)
             )
             .ok();
@@ -228,7 +228,7 @@ fn fmt_savings(orig: u64, new: u64) -> String {
 fn term_cols() -> Option<usize> {
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     let ok = unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) };
-    (ok == 0 && ws.ws_col > 0).then(|| ws.ws_col as usize)
+    (ok == 0 && ws.ws_col > 0).then_some(ws.ws_col as usize)
 }
 
 // ponytail: counts chars, not display width — wide (CJK) names can still wrap
@@ -242,106 +242,6 @@ fn fit_one_row(s: &str, cols: Option<usize>) -> String {
     }
     let cut: String = first.chars().take(max.saturating_sub(1)).collect();
     format!("{cut}…")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        fit_one_row, fmt_savings, has_keep_marker, has_multiple_gif_frames, image_quality,
-        is_video, set_keep_marker, should_retry_gif_at_lower_quality,
-    };
-    use image::{codecs::gif::GifEncoder, Frame, RgbaImage};
-    use std::path::Path;
-
-    fn gif_with_frames(frame_count: usize) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        {
-            let mut encoder = GifEncoder::new(&mut bytes);
-            for _ in 0..frame_count {
-                encoder.encode_frame(Frame::new(RgbaImage::new(1, 1))).unwrap();
-            }
-        }
-        bytes
-    }
-
-    #[test]
-    fn keep_marker_round_trip() {
-        let f = std::env::temp_dir().join("avify_keep_marker_test");
-        std::fs::write(&f, b"x").unwrap();
-        assert!(!has_keep_marker(&f));
-        set_keep_marker(&f);
-        assert!(has_keep_marker(&f));
-        std::fs::remove_file(&f).unwrap();
-    }
-
-    #[test]
-    fn savings_line_shows_orig_ratio_final() {
-        assert_eq!(fmt_savings(10_485_760, 2_097_152), "10.0MB → -80% → 2.0MB");
-        assert_eq!(fmt_savings(102_400, 204_800), "100KB → +100% → 200KB");
-        assert_eq!(fmt_savings(0, 1024), "→ 1KB");
-    }
-
-    #[test]
-    fn video_detection() {
-        assert!(is_video(Path::new("clip.MOV")));
-        assert!(is_video(Path::new("rec.mp4")));
-        assert!(!is_video(Path::new("photo.png")));
-        assert!(!is_video(Path::new("rec.av1.mp4")));
-        assert!(!is_video(Path::new("REC.AV1.MP4")));
-    }
-
-    #[test]
-    fn only_multi_frame_gifs_are_animations() {
-        assert!(!has_multiple_gif_frames(&gif_with_frames(1)[..]));
-        assert!(has_multiple_gif_frames(&gif_with_frames(2)[..]));
-    }
-
-    #[test]
-    fn lowers_quality_for_static_gifs_only() {
-        let temp = std::env::temp_dir();
-        let static_gif = temp.join(format!("avify-static-{}.gif", std::process::id()));
-        let animated_gif = temp.join(format!("avify-animated-{}.gif", std::process::id()));
-        std::fs::write(&static_gif, gif_with_frames(1)).unwrap();
-        std::fs::write(&animated_gif, gif_with_frames(2)).unwrap();
-
-        assert_eq!(image_quality(&static_gif, 80.0), 60.0);
-        assert_eq!(image_quality(&static_gif, 50.0), 50.0);
-        assert_eq!(image_quality(&animated_gif, 80.0), 80.0);
-        assert_eq!(image_quality(Path::new("photo.jpg"), 80.0), 80.0);
-
-        std::fs::remove_file(static_gif).unwrap();
-        std::fs::remove_file(animated_gif).unwrap();
-    }
-
-    #[test]
-    fn retries_gif_only_when_the_initial_video_is_not_smaller() {
-        assert!(should_retry_gif_at_lower_quality(
-            Path::new("animation.gif"),
-            59_195,
-            115_220
-        ));
-        assert!(!should_retry_gif_at_lower_quality(
-            Path::new("animation.gif"),
-            59_195,
-            55_109
-        ));
-        assert!(!should_retry_gif_at_lower_quality(
-            Path::new("clip.mp4"),
-            59_195,
-            115_220
-        ));
-    }
-
-    #[test]
-    fn fit_one_row_keeps_lines_to_one_terminal_row() {
-        assert_eq!(fit_one_row("abcd", Some(4)), "abcd");
-        assert_eq!(fit_one_row("abcdef", Some(4)), "abc…");
-        assert_eq!(fit_one_row("multi\nline error", Some(80)), "multi");
-        assert_eq!(
-            fit_one_row("no tty → no truncation", None),
-            "no tty → no truncation"
-        );
-    }
 }
 
 #[cfg(all(not(feature = "heic"), not(target_os = "macos")))]
@@ -407,13 +307,10 @@ fn classify(path: &Path) -> ImageFormat {
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
 
-    match ext.as_deref() {
-        Some(
+    if let Some(
             "arw" | "cr2" | "cr3" | "dng" | "nef" | "orf" | "raf" | "raw" | "rw2" | "pef" | "srw"
             | "x3f",
-        ) => return ImageFormat::Raw,
-        _ => {}
-    }
+        ) = ext.as_deref() { return ImageFormat::Raw }
 
     if let Some(sniffed) = sniff_format(path) {
         return sniffed;
@@ -484,8 +381,8 @@ fn decode_raw(path: &Path, use_xmp: bool) -> Result<DecodedImage> {
         .output_8bit(None)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let width = decoded.width as usize;
-    let height = decoded.height as usize;
+    let width = decoded.width;
+    let height = decoded.height;
     let mut data = decoded.data;
 
     if let Some(ref adj) = adj {
@@ -960,13 +857,12 @@ fn process_file(
         _ => encode_image(path, image_quality(path, quality), speed, use_xmp, outdir)?,
     };
 
-    if let Some(enc) = video_enc {
-        if should_retry_gif_at_lower_quality(path, orig_bytes, out_bytes as u64) {
+    if let Some(enc) = video_enc
+        && should_retry_gif_at_lower_quality(path, orig_bytes, out_bytes as u64) {
             fs::remove_file(&out_path)
                 .with_context(|| format!("Failed to remove {}", out_path.display()))?;
             out_bytes = transcode_video(path, &out_path, enc, GIF_RETRY_CRF)? as usize;
         }
-    }
 
     if orig_bytes > 0 && out_bytes as u64 >= orig_bytes {
         fs::remove_file(&out_path)
@@ -1173,9 +1069,9 @@ fn main() -> Result<()> {
         if count > 0 && orig_total > 0 {
             let saved = orig_total.saturating_sub(avif_total);
             let pct = saved * 100 / orig_total;
-            write!(
+            writeln!(
                 out,
-                "{count} files: {} → {} (saved {}, {pct}%)\n",
+                "{count} files: {} → {} (saved {}, {pct}%)",
                 fmt_size(orig_total),
                 fmt_size(avif_total),
                 fmt_size(saved),
@@ -1183,12 +1079,12 @@ fn main() -> Result<()> {
             .ok();
         }
         if kept > 0 {
-            write!(out, "{kept} file(s) kept — conversion was not smaller\n").ok();
+            writeln!(out, "{kept} file(s) kept — conversion was not smaller").ok();
         }
         if !failures.is_empty() {
-            write!(out, "{} file(s) failed:\n", failures.len()).ok();
+            writeln!(out, "{} file(s) failed:", failures.len()).ok();
             for (name, err) in &failures {
-                write!(out, "  {name}: {err}\n").ok();
+                writeln!(out, "  {name}: {err}").ok();
             }
             #[cfg(all(not(feature = "heic"), not(target_os = "macos")))]
             if failures.iter().any(|(_, err)| *err == HEIC_UNSUPPORTED) {
@@ -1203,4 +1099,104 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        fit_one_row, fmt_savings, has_keep_marker, has_multiple_gif_frames, image_quality,
+        is_video, set_keep_marker, should_retry_gif_at_lower_quality,
+    };
+    use image::{codecs::gif::GifEncoder, Frame, RgbaImage};
+    use std::path::Path;
+
+    fn gif_with_frames(frame_count: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            for _ in 0..frame_count {
+                encoder.encode_frame(Frame::new(RgbaImage::new(1, 1))).unwrap();
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn keep_marker_round_trip() {
+        let f = std::env::temp_dir().join("avify_keep_marker_test");
+        std::fs::write(&f, b"x").unwrap();
+        assert!(!has_keep_marker(&f));
+        set_keep_marker(&f);
+        assert!(has_keep_marker(&f));
+        std::fs::remove_file(&f).unwrap();
+    }
+
+    #[test]
+    fn savings_line_shows_orig_ratio_final() {
+        assert_eq!(fmt_savings(10_485_760, 2_097_152), "10.0MB → -80% → 2.0MB");
+        assert_eq!(fmt_savings(102_400, 204_800), "100KB → +100% → 200KB");
+        assert_eq!(fmt_savings(0, 1024), "→ 1KB");
+    }
+
+    #[test]
+    fn video_detection() {
+        assert!(is_video(Path::new("clip.MOV")));
+        assert!(is_video(Path::new("rec.mp4")));
+        assert!(!is_video(Path::new("photo.png")));
+        assert!(!is_video(Path::new("rec.av1.mp4")));
+        assert!(!is_video(Path::new("REC.AV1.MP4")));
+    }
+
+    #[test]
+    fn only_multi_frame_gifs_are_animations() {
+        assert!(!has_multiple_gif_frames(&gif_with_frames(1)[..]));
+        assert!(has_multiple_gif_frames(&gif_with_frames(2)[..]));
+    }
+
+    #[test]
+    fn lowers_quality_for_static_gifs_only() {
+        let temp = std::env::temp_dir();
+        let static_gif = temp.join(format!("avify-static-{}.gif", std::process::id()));
+        let animated_gif = temp.join(format!("avify-animated-{}.gif", std::process::id()));
+        std::fs::write(&static_gif, gif_with_frames(1)).unwrap();
+        std::fs::write(&animated_gif, gif_with_frames(2)).unwrap();
+
+        assert_eq!(image_quality(&static_gif, 80.0), 60.0);
+        assert_eq!(image_quality(&static_gif, 50.0), 50.0);
+        assert_eq!(image_quality(&animated_gif, 80.0), 80.0);
+        assert_eq!(image_quality(Path::new("photo.jpg"), 80.0), 80.0);
+
+        std::fs::remove_file(static_gif).unwrap();
+        std::fs::remove_file(animated_gif).unwrap();
+    }
+
+    #[test]
+    fn retries_gif_only_when_the_initial_video_is_not_smaller() {
+        assert!(should_retry_gif_at_lower_quality(
+            Path::new("animation.gif"),
+            59_195,
+            115_220
+        ));
+        assert!(!should_retry_gif_at_lower_quality(
+            Path::new("animation.gif"),
+            59_195,
+            55_109
+        ));
+        assert!(!should_retry_gif_at_lower_quality(
+            Path::new("clip.mp4"),
+            59_195,
+            115_220
+        ));
+    }
+
+    #[test]
+    fn fit_one_row_keeps_lines_to_one_terminal_row() {
+        assert_eq!(fit_one_row("abcd", Some(4)), "abcd");
+        assert_eq!(fit_one_row("abcdef", Some(4)), "abc…");
+        assert_eq!(fit_one_row("multi\nline error", Some(80)), "multi");
+        assert_eq!(
+            fit_one_row("no tty → no truncation", None),
+            "no tty → no truncation"
+        );
+    }
 }
