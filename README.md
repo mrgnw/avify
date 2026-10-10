@@ -49,6 +49,7 @@ If no files are given, converts all supported images in the current directory.
 | `-m, --move-originals` | Move originals to this directory after conversion | |
 | `-k, --keep` | Keep originals (default trashes each on success, macOS) | |
 | `-x, --xmp` | Apply Lightroom XMP sidecar edits | |
+| `-Q, --quiet` | Suppress per-file progress; print only the final summary | off |
 | `--video` | Also transcode videos to AV1 (`.av1.mp4`) — requires `ffmpeg` | off |
 
 ### Video (`--video`)
