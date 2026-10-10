@@ -9,8 +9,8 @@ use rgb::RGB8;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
 
 enum DecodedImage {
     Rgb(ImgVec<RGB8>),
@@ -55,6 +55,13 @@ struct Args {
     )]
     video: bool,
 
+    #[arg(
+        short = 'Q',
+        long,
+        help = "Suppress per-file progress; print only the final summary"
+    )]
+    quiet: bool,
+
     files: Vec<PathBuf>,
 }
 
@@ -72,10 +79,11 @@ struct Progress {
     statuses: Vec<Status>,
     flushed: usize,
     active_lines: usize,
+    quiet: bool,
 }
 
 impl Progress {
-    fn new(files: &[PathBuf]) -> Self {
+    fn new(files: &[PathBuf], quiet: bool) -> Self {
         let names = files
             .iter()
             .map(|p| {
@@ -91,6 +99,7 @@ impl Progress {
             statuses,
             flushed: 0,
             active_lines: 0,
+            quiet,
         }
     }
 
@@ -99,6 +108,9 @@ impl Progress {
     }
 
     fn render(&mut self) {
+        if self.quiet {
+            return;
+        }
         let total = self.statuses.len();
         let width = total.to_string().len();
         let mut out = io::stderr().lock();
@@ -308,9 +320,12 @@ fn classify(path: &Path) -> ImageFormat {
         .map(|e| e.to_ascii_lowercase());
 
     if let Some(
-            "arw" | "cr2" | "cr3" | "dng" | "nef" | "orf" | "raf" | "raw" | "rw2" | "pef" | "srw"
-            | "x3f",
-        ) = ext.as_deref() { return ImageFormat::Raw }
+        "arw" | "cr2" | "cr3" | "dng" | "nef" | "orf" | "raf" | "raw" | "rw2" | "pef" | "srw"
+        | "x3f",
+    ) = ext.as_deref()
+    {
+        return ImageFormat::Raw;
+    }
 
     if let Some(sniffed) = sniff_format(path) {
         return sniffed;
@@ -858,11 +873,12 @@ fn process_file(
     };
 
     if let Some(enc) = video_enc
-        && should_retry_gif_at_lower_quality(path, orig_bytes, out_bytes as u64) {
-            fs::remove_file(&out_path)
-                .with_context(|| format!("Failed to remove {}", out_path.display()))?;
-            out_bytes = transcode_video(path, &out_path, enc, GIF_RETRY_CRF)? as usize;
-        }
+        && should_retry_gif_at_lower_quality(path, orig_bytes, out_bytes as u64)
+    {
+        fs::remove_file(&out_path)
+            .with_context(|| format!("Failed to remove {}", out_path.display()))?;
+        out_bytes = transcode_video(path, &out_path, enc, GIF_RETRY_CRF)? as usize;
+    }
 
     if orig_bytes > 0 && out_bytes as u64 >= orig_bytes {
         fs::remove_file(&out_path)
@@ -991,7 +1007,7 @@ fn main() -> Result<()> {
     let before = args.files.len();
     args.files.retain(|p| !has_keep_marker(p));
     let marked = before - args.files.len();
-    if marked > 0 {
+    if marked > 0 && !args.quiet {
         eprintln!(
             "\x1b[33m{marked} file(s) skipped — previously kept as smaller than conversion (xattr -d com.avify.keep to retry)\x1b[0m"
         );
@@ -1016,31 +1032,33 @@ fn main() -> Result<()> {
         None
     };
 
-    let progress = Mutex::new(Progress::new(&args.files));
+    let progress = Mutex::new(Progress::new(&args.files, args.quiet));
     let next = AtomicUsize::new(0);
 
     (0..rayon::current_num_threads())
         .into_par_iter()
-        .for_each(|_| loop {
-            let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if idx >= args.files.len() {
-                break;
-            }
-            if let Err(e) = process_file(
-                idx,
-                &args.files[idx],
-                args.quality,
-                args.speed,
-                args.xmp,
-                video_enc.as_ref(),
-                args.keep,
-                args.outdir.as_deref(),
-                args.move_originals.as_deref(),
-                &progress,
-            ) {
-                let mut p = progress.lock().unwrap();
-                p.set(idx, Status::Failed(format!("{e:#}")));
-                p.render();
+        .for_each(|_| {
+            loop {
+                let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if idx >= args.files.len() {
+                    break;
+                }
+                if let Err(e) = process_file(
+                    idx,
+                    &args.files[idx],
+                    args.quality,
+                    args.speed,
+                    args.xmp,
+                    video_enc.as_ref(),
+                    args.keep,
+                    args.outdir.as_deref(),
+                    args.move_originals.as_deref(),
+                    &progress,
+                ) {
+                    let mut p = progress.lock().unwrap();
+                    p.set(idx, Status::Failed(format!("{e:#}")));
+                    p.render();
+                }
             }
         });
 
@@ -1107,7 +1125,7 @@ mod tests {
         fit_one_row, fmt_savings, has_keep_marker, has_multiple_gif_frames, image_quality,
         is_video, set_keep_marker, should_retry_gif_at_lower_quality,
     };
-    use image::{codecs::gif::GifEncoder, Frame, RgbaImage};
+    use image::{Frame, RgbaImage, codecs::gif::GifEncoder};
     use std::path::Path;
 
     fn gif_with_frames(frame_count: usize) -> Vec<u8> {
@@ -1115,7 +1133,9 @@ mod tests {
         {
             let mut encoder = GifEncoder::new(&mut bytes);
             for _ in 0..frame_count {
-                encoder.encode_frame(Frame::new(RgbaImage::new(1, 1))).unwrap();
+                encoder
+                    .encode_frame(Frame::new(RgbaImage::new(1, 1)))
+                    .unwrap();
             }
         }
         bytes
