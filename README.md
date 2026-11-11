@@ -2,14 +2,33 @@
 
 Batch convert images to AVIF with parallel encoding.
 
-Supports RAW camera files (ARW, CR2, CR3, DNG, NEF, etc.), HEIC/HEIF, and standard formats (JPEG, PNG, WebP, BMP, TIFF, GIF). 
+Supports RAW camera files (ARW, CR2, CR3, DNG, NEF, etc.), HEIC/HEIF, and standard formats (JPEG, PNG, WebP, BMP, TIFF, GIF).
 
-> **Note:** This is proof-of-concept code. It may be unreliable and is not actively maintained.
+## Who it is for
+
+Photographers and anyone with a large folder of photos, screenshots, and screen recordings who wants it smaller without opening an editor. Point it at a folder, get AVIF stills (and optionally AV1 video) back, with a summary of the space saved.
+
+## Built with
+
+Rust (edition 2024), [ravif](https://github.com/kornelski/cavif-rs) for AVIF encoding, [rayon](https://github.com/rayon-rs/rayon) for parallelism, [imagepipe](https://github.com/pedrocr/imagepipe) for RAW, [clap](https://github.com/clap-rs/clap) for the CLI, and `ffmpeg` (SVT-AV1) for optional video.
+
+> **Status:** pre-1.0. Behaviour and flags may still change; see the [roadmap](ROADMAP.md).
 
 ## Install
 
-```
+Requires Rust 1.85 or newer.
+
+```sh
 cargo install avify
+```
+
+Or build from source:
+
+```sh
+git clone https://github.com/mrgnw/avify.git
+cd avify
+cargo build --release
+./target/release/avify --help
 ```
 
 ### HEIC/HEIF support
@@ -18,7 +37,7 @@ On macOS, HEIC works out of the box: files are decoded with the system `sips` to
 
 Elsewhere (or for in-process decoding on macOS), build with the `libheif` system library:
 
-```
+```sh
 brew install libheif
 cargo install avify --features heic
 ```
@@ -31,7 +50,7 @@ flags, so they cannot be enabled after install without a full rebuild.
 
 ## Usage
 
-```
+```sh
 avify [OPTIONS] [FILES]...
 ```
 
@@ -88,6 +107,16 @@ avify -x raw_photos/*.cr3
 - **XMP sidecar edits** — applies Lightroom exposure, contrast, highlights, shadows, white balance, crop, saturation, and vibrance adjustments
 - **10-bit AVIF output** for better color depth
 
+## Development
+
+```sh
+cargo build
+cargo test
+cargo fmt --check
+```
+
+CI runs the same on Linux and macOS. Planned work is in [ROADMAP.md](ROADMAP.md) and the [issue tracker](https://github.com/mrgnw/avify/issues).
+
 ## License
 
 This project is licensed under [MIT](LICENSE).
@@ -95,5 +124,5 @@ This project is licensed under [MIT](LICENSE).
 This project depends on the following libraries with their own licenses:
 
 - [imagepipe](https://github.com/pedrocr/imagepipe) — LGPL-3.0 (RAW decoding)
-- [ravif](https://github.com/nicmcd/ravif) — BSD-3-Clause (AVIF encoding)
-- [libheif](https://github.com/nicmcd/libheif) / [libheif-rs](https://github.com/nicmcd/libheif-rs) — MIT / LGPL-3.0 (HEIC decoding, optional)
+- [ravif](https://github.com/kornelski/cavif-rs) — BSD-3-Clause (AVIF encoding)
+- [libheif](https://github.com/strukturag/libheif) — LGPL-3.0, and [libheif-rs](https://github.com/Cykooz/libheif-rs) — MIT (HEIC decoding, optional)
