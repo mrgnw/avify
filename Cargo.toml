@@ -4,11 +4,14 @@ version = "0.3.4"
 edition = "2024"
 description = "Batch convert images to AVIF — supports RAW, HEIC/HEIF, and standard formats with parallel encoding"
 license = "MIT"
+authors = ["Morgan Williams"]
+rust-version = "1.85"
+homepage = "https://github.com/mrgnw/avify"
 repository = "https://github.com/mrgnw/avify"
 keywords = ["avif", "image", "converter", "raw", "heic"]
 categories = ["command-line-utilities", "multimedia::images"]
 readme = "README.md"
-exclude = ["analysis/"]
+exclude = ["analysis/", ".github/"]
 
 [features]
 default = []
