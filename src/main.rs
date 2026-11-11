@@ -666,6 +666,7 @@ fn has_keep_marker(path: &Path) -> bool {
     let Some(c) = path_cstring(path) else {
         return false;
     };
+    #[cfg(target_os = "macos")]
     let n = unsafe {
         libc::getxattr(
             c.as_ptr(),
@@ -676,6 +677,8 @@ fn has_keep_marker(path: &Path) -> bool {
             0,
         )
     };
+    #[cfg(not(target_os = "macos"))]
+    let n = unsafe { libc::getxattr(c.as_ptr(), KEEP_XATTR.as_ptr(), std::ptr::null_mut(), 0) };
     n >= 0
 }
 
@@ -683,6 +686,7 @@ fn set_keep_marker(path: &Path) {
     let Some(c) = path_cstring(path) else {
         return;
     };
+    #[cfg(target_os = "macos")]
     unsafe {
         libc::setxattr(
             c.as_ptr(),
@@ -692,6 +696,10 @@ fn set_keep_marker(path: &Path) {
             0,
             0,
         );
+    }
+    #[cfg(not(target_os = "macos"))]
+    unsafe {
+        libc::setxattr(c.as_ptr(), KEEP_XATTR.as_ptr(), b"1".as_ptr().cast(), 1, 0);
     }
 }
 
@@ -803,12 +811,14 @@ fn transcode_video(src: &Path, dst: &Path, enc: &VideoEncoder, crf: u8) -> Resul
 
 fn preserve_timestamps(src: &Path, dst: &Path) -> Result<()> {
     use std::fs::FileTimes;
+    #[cfg(target_os = "macos")]
     use std::os::darwin::fs::FileTimesExt;
 
     let meta = fs::metadata(src)
         .with_context(|| format!("Failed to read timestamps from {}", src.display()))?;
 
     let mut times = FileTimes::new();
+    #[cfg(target_os = "macos")]
     if let Ok(created) = meta.created() {
         times = times.set_created(created);
     }
