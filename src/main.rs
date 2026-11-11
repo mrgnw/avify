@@ -340,6 +340,12 @@ fn classify(path: &Path) -> ImageFormat {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+fn is_dataless(_path: &Path) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 fn is_dataless(path: &Path) -> bool {
     use std::os::macos::fs::MetadataExt;
     const SF_DATALESS: u32 = 0x4000_0000;
@@ -840,6 +846,7 @@ fn preserve_timestamps(src: &Path, dst: &Path) -> Result<()> {
 
 fn trash_file(path: &Path) -> Result<()> {
     // ponytail: NsFileManager instead of Finder AppleScript — same trash, no crumple sound
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut ctx = trash::TrashContext::default();
     #[cfg(target_os = "macos")]
     {
