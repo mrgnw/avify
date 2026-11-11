@@ -115,7 +115,13 @@ cargo test
 cargo fmt --check
 ```
 
-CI runs the same on Linux and macOS. Planned work is in [ROADMAP.md](ROADMAP.md) and the [issue tracker](https://github.com/mrgnw/avify/issues).
+A pre-push hook runs the same checks. Enable it once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Planned work is in [ROADMAP.md](ROADMAP.md) and the [issue tracker](https://github.com/mrgnw/avify/issues).
 
 ## License
 
