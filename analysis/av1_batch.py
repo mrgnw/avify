@@ -2,13 +2,17 @@
 # requires-python = ">=3.14"
 # ///
 import json
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
-FFMPEG = '/opt/homebrew/bin/ffmpeg'
-FFPROBE = '/opt/homebrew/bin/ffprobe'
-SRC_DIR = Path.home() / 'Library/Mobile Documents/com~apple~CloudDocs/screenshots'
+FFMPEG = shutil.which('ffmpeg')
+FFPROBE = shutil.which('ffprobe')
+assert FFMPEG and FFPROBE, 'ffmpeg and ffprobe must be on PATH'
+assert len(sys.argv) == 2, 'usage: uv run analysis/av1_batch.py VIDEO_DIR'
+SRC_DIR = Path(sys.argv[1])
 OUT_DIR = Path('/tmp/av1_batch')
 RESULTS = Path(__file__).parent / 'av1_batch_results.json'
 VIDEO_EXTS = {'.mov', '.mp4', '.m4v', '.webm', '.mkv', '.avi'}
