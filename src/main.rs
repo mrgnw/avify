@@ -661,7 +661,10 @@ fn should_retry_gif_at_lower_quality(path: &Path, orig_bytes: u64, output_bytes:
 // Set on originals whose conversion came out bigger, so later runs skip
 // them without re-encoding. Local-only: iCloud eviction can strip it, which
 // just costs one wasted re-encode. Clear with: xattr -d com.avify.keep <file>
+#[cfg(target_os = "macos")]
 const KEEP_XATTR: &std::ffi::CStr = c"com.avify.keep";
+#[cfg(not(target_os = "macos"))]
+const KEEP_XATTR: &std::ffi::CStr = c"user.avify.keep";
 
 fn path_cstring(path: &Path) -> Option<std::ffi::CString> {
     use std::os::unix::ffi::OsStrExt;
