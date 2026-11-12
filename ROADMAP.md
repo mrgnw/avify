@@ -20,7 +20,7 @@ Open work is tracked as [GitHub issues](https://github.com/mrgnw/avify/issues). 
 
 - [#9](https://github.com/mrgnw/avify/issues/9) Linux and Windows parity for the keep marker and trash
 - [#10](https://github.com/mrgnw/avify/issues/10) End-to-end CLI tests with generated fixtures
-- [#11](https://github.com/mrgnw/avify/issues/11) Split `main.rs` into modules, clippy clean in CI
+- [#11](https://github.com/mrgnw/avify/issues/11) Split `main.rs` into modules, clippy clean
 
 ## Distribution
 
