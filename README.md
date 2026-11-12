@@ -16,11 +16,13 @@ Rust (edition 2024), [ravif](https://github.com/kornelski/cavif-rs) for AVIF enc
 
 ## Install
 
-Requires Rust 1.85 or newer.
+Requires Rust 1.88 or newer. On x86_64 Linux, building the AV1 encoder also needs `nasm`.
 
 ```sh
 cargo install avify
 ```
+
+A prebuilt macOS (Apple silicon) binary for v0.2.1 is on the [releases page](https://github.com/mrgnw/avify/releases/tag/v0.2.1). Later versions are tagged but have no binaries yet; see [#12](https://github.com/mrgnw/avify/issues/12).
 
 Or build from source:
 
@@ -35,12 +37,14 @@ cargo build --release
 
 On macOS, HEIC works out of the box: files are decoded with the system `sips` tool.
 
-Elsewhere (or for in-process decoding on macOS), build with the `libheif` system library:
+Elsewhere (or for in-process decoding on macOS), build with the `libheif` system library. On macOS:
 
 ```sh
 brew install libheif
 cargo install avify --features heic
 ```
+
+On Debian or Ubuntu, install the development package instead (`libheif-dev`), then run the same `cargo install` line. The `heic` build is untested on Windows.
 
 Why libheif is not on by default: there is no pure-Rust HEVC decoder. `libheif-rs` can
 compile libheif from vendored source (`embedded-libheif`), but that needs cmake and a C++
