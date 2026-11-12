@@ -6,3 +6,5 @@ target/
 *.key
 .DS_Store
 analysis/*_results.json
+__pycache__/
+*.pyc
