@@ -77,7 +77,7 @@ If no files are given, converts all supported images in the current directory.
 
 ### Video (`--video`)
 
-Animated GIFs are transcoded to AV1 video (`name.av1.mp4`) to preserve their animation. Single-frame GIFs are encoded as AVIF stills, including transparency, with a quality cap of 60; other still images use the requested quality (80 by default). If the normal animated-GIF encode is larger than the source, avify retries at a lower bitrate before keeping the original. Other video files are opt-in: with `--video`, files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) using SVT-AV1 (`-preset 10 -crf 32` — on screen recordings: ~87% smaller, faster than realtime, visually transparent). Requires `ffmpeg` with `libsvtav1`:
+Animated GIFs are transcoded to AV1 video (`name.av1.mp4`) to preserve their animation. Single-frame GIFs are encoded as AVIF stills, including transparency, with a quality cap of 60; other still images use the requested quality (80 by default). If the normal animated-GIF encode is larger than the source, avify retries at a lower bitrate before keeping the original. Other video files are opt-in: with `--video`, files (`mov`, `mp4`, `m4v`, `webm`, `mkv`, `avi`) are transcoded to AV1 (`name.av1.mp4`, audio copied) using SVT-AV1 (`-preset 10 -crf 32`; measured on the author's own screen recordings, about 87% smaller and faster than realtime; not a general benchmark). Requires `ffmpeg` with `libsvtav1`:
 
 ```sh
 brew install ffmpeg
@@ -108,8 +108,9 @@ avify -x raw_photos/*.cr3
 - **Parallel encoding** via rayon — uses all CPU cores
 - **RAW support** via imagepipe (ARW, CR2, CR3, DNG, NEF, ORF, RAF, RW2, PEF, SRW, X3F)
 - **HEIC/HEIF support** — via `sips` on macOS, or libheif with `--features heic`
-- **XMP sidecar edits** — applies Lightroom exposure, contrast, highlights, shadows, white balance, crop, saturation, and vibrance adjustments
-- **10-bit AVIF output** for better color depth
+- **XMP sidecar edits** (experimental, RAW only) — approximates Lightroom exposure, contrast, highlights, shadows, white balance, crop, saturation, and vibrance adjustments; other edits are ignored ([#8](https://github.com/mrgnw/avify/issues/8))
+- **10-bit AVIF encoding** — the encoder runs at 10 bits, but images are decoded to 8-bit first, so 10-bit and HDR source detail is not preserved
+- **Metadata is dropped** — EXIF, ICC profile and orientation are not copied to the AVIF yet ([#3](https://github.com/mrgnw/avify/issues/3))
 
 ## Development
 
@@ -119,7 +120,7 @@ cargo test
 cargo fmt --check
 ```
 
-A pre-push hook runs the same checks. Enable it once per clone:
+There is no hosted CI. The pre-push hook in `.githooks/pre-push` runs `cargo fmt --check`, `cargo build --locked` and `cargo test --locked` on your machine. Enable it once per clone:
 
 ```sh
 git config core.hooksPath .githooks
@@ -134,5 +135,6 @@ This project is licensed under [MIT](LICENSE).
 This project depends on the following libraries with their own licenses:
 
 - [imagepipe](https://github.com/pedrocr/imagepipe) — LGPL-3.0 (RAW decoding)
+- [rawloader](https://github.com/pedrocr/rawloader) — LGPL-2.1 (RAW decoding, pulled in by imagepipe)
 - [ravif](https://github.com/kornelski/cavif-rs) — BSD-3-Clause (AVIF encoding)
 - [libheif](https://github.com/strukturag/libheif) — LGPL-3.0, and [libheif-rs](https://github.com/Cykooz/libheif-rs) — MIT (HEIC decoding, optional)
