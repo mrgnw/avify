@@ -1,0 +1,93 @@
+{
+	"avify_version": "avify 0.3.4",
+	"runs": [
+		{
+			"quality": 80,
+			"speed": 10,
+			"command": "avify --keep --quiet --quality 80 --speed 10 --outdir OUTPUT_DIR PHOTO_DIR",
+			"seconds": 1.65,
+			"total_input_bytes": 77809258,
+			"total_avif_bytes": 7141577,
+			"total_ratio": 10.9,
+			"rows": [
+				{
+					"name": "bear-mountain.jpg",
+					"kind": "JPEG",
+					"width": 5184,
+					"height": 3456,
+					"input_bytes": 10221369,
+					"avif_bytes": 1936646,
+					"ssimulacra2": 71.6,
+					"ssim": 0.964,
+					"ratio": 5.3
+				},
+				{
+					"name": "rocks.dng",
+					"kind": "RAW",
+					"width": 5488,
+					"height": 3664,
+					"input_bytes": 20474979,
+					"avif_bytes": 950934,
+					"ssimulacra2": 72.5,
+					"ssim": 0.948,
+					"ratio": 21.5
+				},
+				{
+					"name": "tulips.png",
+					"kind": "PNG",
+					"width": 6028,
+					"height": 4024,
+					"input_bytes": 47112910,
+					"avif_bytes": 4253997,
+					"ssimulacra2": 76.2,
+					"ssim": 0.949,
+					"ratio": 11.1
+				}
+			]
+		},
+		{
+			"quality": 90,
+			"speed": 10,
+			"command": "avify --keep --quiet --quality 90 --speed 10 --outdir OUTPUT_DIR PHOTO_DIR",
+			"seconds": 2.3,
+			"total_input_bytes": 77809258,
+			"total_avif_bytes": 15013687,
+			"total_ratio": 5.2,
+			"rows": [
+				{
+					"name": "bear-mountain.jpg",
+					"kind": "JPEG",
+					"width": 5184,
+					"height": 3456,
+					"input_bytes": 10221369,
+					"avif_bytes": 3886977,
+					"ssimulacra2": 83.2,
+					"ssim": 0.985,
+					"ratio": 2.6
+				},
+				{
+					"name": "rocks.dng",
+					"kind": "RAW",
+					"width": 5488,
+					"height": 3664,
+					"input_bytes": 20474979,
+					"avif_bytes": 2415453,
+					"ssimulacra2": 83.6,
+					"ssim": 0.968,
+					"ratio": 8.5
+				},
+				{
+					"name": "tulips.png",
+					"kind": "PNG",
+					"width": 6028,
+					"height": 4024,
+					"input_bytes": 47112910,
+					"avif_bytes": 8711257,
+					"ssimulacra2": 87.0,
+					"ssim": 0.978,
+					"ratio": 5.4
+				}
+			]
+		}
+	]
+}
