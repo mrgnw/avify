@@ -5,7 +5,7 @@
 			"quality": 80,
 			"speed": 10,
 			"command": "avify --keep --quiet --quality 80 --speed 10 --outdir OUTPUT_DIR PHOTO_DIR",
-			"seconds": 2.3,
+			"seconds": 1.62,
 			"summary": "3 files: 74.2MB \u2192 6.8MB (saved 67.4MB, 90%)",
 			"total_input_bytes": 77809258,
 			"total_avif_bytes": 7141577,
@@ -50,7 +50,7 @@
 			"quality": 90,
 			"speed": 10,
 			"command": "avify --keep --quiet --quality 90 --speed 10 --outdir OUTPUT_DIR PHOTO_DIR",
-			"seconds": 3.63,
+			"seconds": 7.51,
 			"summary": "3 files: 74.2MB \u2192 14.3MB (saved 59.9MB, 80%)",
 			"total_input_bytes": 77809258,
 			"total_avif_bytes": 15013687,
@@ -88,6 +88,51 @@
 					"ssimulacra2": 87.0,
 					"ssim": 0.978,
 					"ratio": 5.4
+				}
+			]
+		},
+		{
+			"quality": 95,
+			"speed": 10,
+			"command": "avify --keep --quiet --quality 95 --speed 10 --outdir OUTPUT_DIR PHOTO_DIR",
+			"seconds": 3.56,
+			"summary": "3 files: 74.2MB \u2192 26.7MB (saved 47.5MB, 64%)",
+			"total_input_bytes": 77809258,
+			"total_avif_bytes": 27995362,
+			"total_ratio": 2.8,
+			"rows": [
+				{
+					"name": "bear-mountain.jpg",
+					"kind": "JPEG",
+					"width": 5184,
+					"height": 3456,
+					"input_bytes": 10221369,
+					"avif_bytes": 6465510,
+					"ssimulacra2": 87.3,
+					"ssim": 0.993,
+					"ratio": 1.6
+				},
+				{
+					"name": "rocks.dng",
+					"kind": "RAW",
+					"width": 5488,
+					"height": 3664,
+					"input_bytes": 20474979,
+					"avif_bytes": 5815586,
+					"ssimulacra2": 88.4,
+					"ssim": 0.981,
+					"ratio": 3.5
+				},
+				{
+					"name": "tulips.png",
+					"kind": "PNG",
+					"width": 6028,
+					"height": 4024,
+					"input_bytes": 47112910,
+					"avif_bytes": 15714266,
+					"ssimulacra2": 91.4,
+					"ssim": 0.992,
+					"ratio": 3.0
 				}
 			]
 		}

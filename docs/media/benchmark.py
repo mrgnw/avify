@@ -160,7 +160,7 @@ def main() -> None:
 	parser.add_argument('--avify', default='avify')
 	parser.add_argument('--raw-reference', required=True, help='path to the raw_reference example binary')
 	parser.add_argument('--ssimulacra2', default='ssimulacra2_rs')
-	parser.add_argument('--quality', type=int, nargs='+', default=[80, 90])
+	parser.add_argument('--quality', type=int, nargs='+', default=[80, 90, 95])
 	parser.add_argument('--speed', type=int, default=10)
 	parser.add_argument('--json', type=Path, help='write results here')
 	args = parser.parse_args()
