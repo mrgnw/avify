@@ -1,6 +1,6 @@
 # avify
 
-Batch-convert photo folders to smaller AVIF files with parallel encoding in Rust.
+Batch-convert photo folders to AVIF. At default settings, a test folder of CC0 photos shrank 10.9x: RAW 21.5x, PNG 11.1x, JPEG 5.3x.
 
 [![License: MIT](https://img.shields.io/github/license/mrgnw/avify?style=flat)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/mrgnw/avify?style=flat)](https://github.com/mrgnw/avify/commits/main/)
@@ -9,12 +9,63 @@ Batch-convert photo folders to smaller AVIF files with parallel encoding in Rust
 [![Rust: 1.88+](https://img.shields.io/badge/Rust-1.88%2B-orange?style=flat)](Cargo.toml)
 [![Platform: macOS and Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat)](#install)
 
-![A real avify run: two generated images become smaller AVIF files; a gradient stays in its original format because conversion would grow it.](docs/media/demo.gif)
+![A folder of three photos (JPEG 10.2 MB, DNG 20.5 MB, PNG 47.1 MB, 77.8 MB in total) is converted by avify to 7.1 MB, 10.9x smaller; then a 100% crop of the RAW photo sweeps between the original and the AVIF.](docs/media/hero.gif)
 
-[Install](#install) · [Usage](#usage) · [Size savings](#size-savings) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [Usage](#usage) · [Size and quality](#size-and-quality) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
 > [!NOTE]
 > This project uses AI-assisted development and documentation. Contributions are welcome; changes need review and local checks. avify is pre-1.0, so behavior and flags may change.
+
+## Size and quality
+
+avify 0.3.4 converted three freely licensed photos ([credits](docs/media/CREDITS.md)) on an Apple M4 Pro. Default settings are quality 80 and speed 10; every run used `--keep --quiet --speed 10`.
+
+![Bar chart of file size per photo at default settings: PNG 47.1 MB to 4.3 MB (11.1x), RAW 20.5 MB to 0.95 MB (21.5x), JPEG 10.2 MB to 1.9 MB (5.3x).](docs/media/results.png)
+
+| Input | Quality | Original bytes | AVIF bytes | Smaller by | SSIMULACRA2 |
+|-|-|-|-|-|-|
+| RAW (Pentax DNG, 20 MP) | 80 (default) | 20,474,979 | 950,934 | 21.5x | 72.5 |
+| PNG (export of a 24 MP RAW) | 80 (default) | 47,112,910 | 4,253,997 | 11.1x | 76.2 |
+| JPEG (camera, quality about 98, 18 MP) | 80 (default) | 10,221,369 | 1,936,646 | 5.3x | 71.6 |
+| RAW | 90 | 20,474,979 | 2,415,453 | 8.5x | 83.6 |
+| PNG | 90 | 47,112,910 | 8,711,257 | 5.4x | 87.0 |
+| JPEG | 90 | 10,221,369 | 3,886,977 | 2.6x | 83.2 |
+| RAW | 95 | 20,474,979 | 5,815,586 | 3.5x | 88.4 |
+| PNG | 95 | 47,112,910 | 15,714,266 | 3.0x | 91.4 |
+| JPEG | 95 | 10,221,369 | 6,465,510 | 1.6x | 87.3 |
+
+The whole folder went from 77,809,258 to 7,141,577 bytes at the default quality: 10.9x smaller. The ratio depends on the source. RAW and PNG files store far more data than the picture needs, so they shrink 10x or more; a JPEG is already compressed, so it shrinks about 5x. The three-photo run took 1.6–7.5 s of wall-clock time across repeated runs on a busy machine.
+
+### How quality was measured
+
+[SSIMULACRA2](https://github.com/cloudinary/ssimulacra2) (the `ssimulacra2_rs` 0.5.2 implementation) compares each AVIF with the exact pixels avify encoded: the decoded JPEG or PNG, or, for the RAW file, avify's own development of it. On its scale, 90 means visually lossless at 1:1 viewing, 80 very high quality, 70 high quality and 50 medium quality. `results.json` also records SSIM from scikit-image.
+
+At the default quality 80 the scores are 71.6–76.2: high quality, not visually lossless. Quality 90 scores 83.2–87.0 at 2.6–8.5x smaller. Only the PNG crossed 90, at quality 95. If you need copies that hold up to pixel peeping, use `--quality 90` or `--quality 95`.
+
+Judge for yourself: each row is a 100% crop, with no scaling, of the original, the default-quality AVIF, and their absolute difference amplified eight times. The difference is mostly fine grain and sensor noise; edges stay in place.
+
+![100% crops at default quality. Rows: RAW rock texture, JPEG snowy mountainside, PNG tulip and grass. Columns: original, AVIF, difference amplified eight times.](docs/media/quality-crops.png)
+
+### Reproduce the numbers
+
+The photos are downloaded from the URLs in [CREDITS.md](docs/media/CREDITS.md) and checked against their SHA-256 sums. You need [uv](https://docs.astral.sh/uv/), Rust, and about 1 GB of free space. Choose a working directory:
+
+```sh
+BENCH_DIR=$(mktemp -d)
+```
+
+```sh
+cargo install ssimulacra2_rs --no-default-features
+cargo build --release
+cargo build --release --example raw_reference
+uv run docs/media/benchmark.py "$BENCH_DIR" --avify target/release/avify --raw-reference target/release/examples/raw_reference --json docs/media/results.json
+```
+
+Redraw the GIF, chart, crops and social preview from those results (uses macOS system fonts):
+
+```sh
+uv run docs/media/render.py "$BENCH_DIR"
+```
 
 ## Who it is for
 
@@ -112,34 +163,6 @@ cargo install --git https://github.com/mrgnw/avify.git --locked --features heic
 ```
 
 The default macOS build uses `sips` and needs no extra HEIC library. The optional build uses `libheif-rs`; a system HEVC decoder is needed, so enabling the Cargo feature alone does not provide the native libraries.
-
-## Size savings
-
-Measured with avify v0.3.4 on macOS (Apple silicon), quality 80 and speed 10, keeping originals. Inputs are generated 960×640 images: a seeded textured landscape saved as JPEG (quality 95, no chroma subsampling) and PNG, plus a smooth synthetic gradient. The JPEG and textured PNG depict the same raster.
-
-| Generated input | Input bytes | Retained output bytes | Space saved |
-|-|-|-|-|
-| Landscape JPEG | 282,742 | 106,892 (AVIF) | 62.2% |
-| Textured landscape PNG | 633,623 | 101,289 (AVIF) | 84.0% |
-| Gradient PNG | 10,761 | 10,761 (original PNG) | 0% — larger AVIF discarded |
-
-These are synthetic examples, not a photo-corpus benchmark or a visual-quality comparison. AVIF conversion is lossy. Savings depend on content, source compression, quality, and speed. Percentages use `(input bytes − retained output bytes) / input bytes`; retained originals count as zero savings. Keeping originals means these runs create sharing copies rather than reclaim disk space.
-
-Reproduce from a source checkout with [uv](https://docs.astral.sh/uv/); the [generator](docs/media/generate-samples.py) pins Pillow and refuses to overwrite sample files. Choose an empty directory:
-
-```sh
-DEMO_DIR=$(mktemp -d)
-```
-
-```sh
-uv run docs/media/generate-samples.py "$DEMO_DIR"
-```
-
-```sh
-avify --keep --quality 80 --speed 10 --outdir "$DEMO_DIR/converted" "$DEMO_DIR"
-```
-
-File sizes were read from the resulting files on disk. The [asciinema recording](docs/media/demo.cast) shows the same generated samples, rendered to GIF with agg. The social preview was made with AI image generation.
 
 ## Usage
 
