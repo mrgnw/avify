@@ -98,7 +98,9 @@ def measure(args: argparse.Namespace, photos: Path, quality: int) -> dict:
 		shutil.rmtree(outdir)
 	flags = ['--keep', '--quiet', '--quality', str(quality), '--speed', str(args.speed)]
 	started = time.monotonic()
-	subprocess.run([args.avify, *flags, '--outdir', str(outdir), str(photos)], check=True)
+	encoded = subprocess.run(
+		[args.avify, *flags, '--outdir', str(outdir), str(photos)], capture_output=True, text=True, check=True
+	)
 	seconds = round(time.monotonic() - started, 2)
 
 	rows = []
@@ -131,6 +133,7 @@ def measure(args: argparse.Namespace, photos: Path, quality: int) -> dict:
 		'speed': args.speed,
 		'command': f'avify {" ".join(flags)} --outdir OUTPUT_DIR PHOTO_DIR',
 		'seconds': seconds,
+		'summary': encoded.stderr.strip(),
 		'total_input_bytes': total_input,
 		'total_avif_bytes': total_avif,
 		'total_ratio': round(total_input / total_avif, 1),
