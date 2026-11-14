@@ -218,7 +218,7 @@ def hero_gif(workdir: Path, run: dict, out: Path) -> None:
 		add(folder_frame(run, ease(step / 10) * 0.999, command, ''), 70)
 	summary_frame = folder_frame(run, 1, command, f'{len(run["rows"])} AVIF files in avif/, originals kept')
 	add(summary_frame, 3500)
-	for step in range(0, 25):
+	for step in range(25):
 		split = 0.5 + 0.42 * np.cos(np.pi * step / 12)
 		add(sweep_frame(original, avif, run, row, split), 90)
 	add(sweep_frame(original, avif, run, row, 0.5), 2500)
@@ -266,10 +266,14 @@ def main() -> None:
 	parser.add_argument('--results', type=Path, default=Path(__file__).parent / 'results.json')
 	parser.add_argument('--out', type=Path, default=Path(__file__).parent)
 	args = parser.parse_args()
-	run = json.loads(args.results.read_text())['runs'][0]
+	runs = json.loads(args.results.read_text())['runs']
+	run = runs[0]
 	assert run['quality'] == 80, 'the first run must use the default quality'
 	results_chart(run, args.out / 'results.png')
 	crop_comparison(args.workdir, run, args.out / 'quality-crops.png')
+	quality_run = next((item for item in runs if item['quality'] == 97 and item['speed'] == 10), None)
+	if quality_run is not None:
+		crop_comparison(args.workdir, quality_run, args.out / 'quality-crops-q97.png')
 	social_preview(args.workdir, run, args.out / 'social-preview.png')
 	hero_gif(args.workdir, run, args.out / 'hero.gif')
 
