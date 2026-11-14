@@ -1,6 +1,6 @@
 # Media credits
 
-The benchmark photos are not stored in this repository. `benchmark.py` downloads them from these URLs and checks their SHA-256 sums. None show people; `exiftool` found no GPS coordinates in any of them.
+The benchmark photos are not stored in this repository. `benchmark.py` downloads them from these URLs and checks their SHA-256 sums. None show people. `exiftool` found no GPS coordinates in the three downloads or benchmark inputs. The DNGs contain only a GPS version identifier, not a location.
 
 | File in the benchmark | Source | Author | Licence | SHA-256 of the download |
 |-|-|-|-|-|
@@ -10,4 +10,4 @@ The benchmark photos are not stored in this repository. `benchmark.py` downloads
 
 `tulips.png` is made by `benchmark.py`: LibRaw (through rawpy 0.27.0) develops the DNG with the camera white balance into an 8-bit sRGB image, and Pillow saves it as PNG at its default compression level.
 
-`hero.gif`, `results.png`, `quality-crops.png` and `social-preview.png` are rendered by `render.py` from these photos and `results.json`. They are released under this repository's [MIT licence](../../LICENSE); the photo crops inside them stay CC0.
+`hero.gif`, `results.png`, `quality-crops.png`, `quality-crops-q97.png` and `social-preview.png` are rendered by `render.py` from these photos and `results.json`. They are released under this repository's [MIT licence](../../LICENSE); the photo crops inside them stay CC0.

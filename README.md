@@ -22,7 +22,7 @@ avify 0.3.4 converted three freely licensed photos ([credits](docs/media/CREDITS
 
 ![Bar chart of file size per photo at default settings: PNG 47.1 MB to 4.3 MB (11.1x), RAW 20.5 MB to 0.95 MB (21.5x), JPEG 10.2 MB to 1.9 MB (5.3x).](docs/media/results.png)
 
-| Input | Quality | Original bytes | AVIF bytes | Smaller by | SSIMULACRA2 |
+| Input | Quality | Original bytes | Retained bytes | Smaller by | SSIMULACRA2 |
 |-|-|-|-|-|-|
 | RAW (Pentax DNG, 20 MP) | 80 (default) | 20,474,979 | 950,934 | 21.5x | 72.5 |
 | PNG (export of a 24 MP RAW) | 80 (default) | 47,112,910 | 4,253,997 | 11.1x | 76.2 |
@@ -33,29 +33,41 @@ avify 0.3.4 converted three freely licensed photos ([credits](docs/media/CREDITS
 | RAW | 95 | 20,474,979 | 5,815,586 | 3.5x | 88.4 |
 | PNG | 95 | 47,112,910 | 15,714,266 | 3.0x | 91.4 |
 | JPEG | 95 | 10,221,369 | 6,465,510 | 1.6x | 87.3 |
+| RAW | 97 | 20,474,979 | 10,088,982 | 2.0x | 90.3 |
+| PNG | 97 | 47,112,910 | 22,569,629 | 2.1x | 92.8 |
+| JPEG | 97 | 10,221,369 | 9,052,868 | 1.1x | 88.7 |
+| RAW | 98 | 20,474,979 | 14,891,221 | 1.4x | 91.1 |
+| PNG | 98 | 47,112,910 | 29,042,607 | 1.6x | 93.2 |
+| JPEG | 98 | 10,221,369 | 10,221,369 (JPEG kept) | 1.0x | — |
 
-The whole folder went from 77,809,258 to 7,141,577 bytes at the default quality: 10.9x smaller. The ratio depends on the source. RAW and PNG files store far more data than the picture needs, so they shrink 10x or more; a JPEG is already compressed, so it shrinks about 5x. The three-photo run took 1.6–7.5 s of wall-clock time across repeated runs on a busy machine.
+The whole folder went from 77,809,258 to 7,141,577 bytes at the default quality: 10.9x smaller. These ratios describe these three photos, not every folder or input format. A RAW file stores sensor data and a PNG export stores a lossless raster; conversion to AVIF discards information. A JPEG is already compressed. All outputs in the table are AVIF except the explicitly retained JPEG. Keeping originals creates smaller sharing copies; it does not reduce total disk usage.
 
 ### How quality was measured
 
-[SSIMULACRA2](https://github.com/cloudinary/ssimulacra2) (the `ssimulacra2_rs` 0.5.2 implementation) compares each AVIF with the exact pixels avify encoded: the decoded JPEG or PNG, or, for the RAW file, avify's own development of it. On its scale, 90 means visually lossless at 1:1 viewing, 80 very high quality, 70 high quality and 50 medium quality. `results.json` also records SSIM from scikit-image.
+[SSIMULACRA2](https://github.com/cloudinary/ssimulacra2) (the `ssimulacra2_rs` 0.5.2 implementation) compares each AVIF with a reference PNG: Pillow's RGB decoding of the JPEG or PNG input, or, for the RAW file, avify's own 8-bit development of it. The RAW score measures encoding loss after development; it does not measure lost sensor data, dynamic range, or differences from other RAW developers. On its scale, 90 means visually lossless at 1:1 viewing, 80 very high quality, 70 high quality and 50 medium quality. `results.json` also records SSIM from scikit-image.
 
-At the default quality 80 the scores are 71.6–76.2: high quality, not visually lossless. Quality 90 scores 83.2–87.0 at 2.6–8.5x smaller. Only the PNG crossed 90, at quality 95. If you need copies that hold up to pixel peeping, use `--quality 90` or `--quality 95`.
+At the default quality 80 the scores are 71.6–76.2. Fine texture and grain are visibly smoothed; these results are not visually lossless. The metric's visually lossless range starts at 90: the PNG reaches it at quality 95 (91.4, 3.0x smaller), and the RAW at quality 97 (90.3, 2.0x smaller), both at speed 10. This is a metric-based estimate, not a guarantee for every viewer or image.
 
-Judge for yourself: each row is a 100% crop, with no scaling, of the original, the default-quality AVIF, and their absolute difference amplified eight times. The difference is mostly fine grain and sensor noise; edges stay in place.
+The JPEG reaches only 88.7 at quality 97 (1.1x smaller). At quality 98, avify discards its larger AVIF and keeps the 10,221,369-byte JPEG unchanged. No smaller JPEG AVIF in this sweep reached 90. There is no measured basis here for claiming visually lossless compression of the whole folder by ten times.
+
+Judge for yourself: each row is a 100% crop, with no scaling, of the original, the default-quality AVIF, and their absolute difference amplified eight times. The difference includes lost fine texture and sensor noise.
 
 ![100% crops at default quality. Rows: RAW rock texture, JPEG snowy mountainside, PNG tulip and grass. Columns: original, AVIF, difference amplified eight times.](docs/media/quality-crops.png)
 
+The same crops at quality 97 and speed 10 show the higher-quality alternative. The RAW and PNG score above 90; the JPEG still scores below it.
+
+![The same unscaled crops at quality 97: RAW SSIMULACRA2 90.3, JPEG 88.7, PNG 92.8. Columns: reference, AVIF, absolute difference amplified eight times.](docs/media/quality-crops-q97.png)
+
 ### Reproduce the numbers
 
-The photos are downloaded from the URLs in [CREDITS.md](docs/media/CREDITS.md) and checked against their SHA-256 sums. You need [uv](https://docs.astral.sh/uv/), Rust, and about 1 GB of free space. Choose a working directory:
+The default sweep measures qualities 80, 90, 95, 97 and 98 at speed 10. Each run uses fresh input copies so a keep marker from an earlier run cannot affect it. Retained originals count as zero savings and have no AVIF quality score. The photos are downloaded from the URLs in [CREDITS.md](docs/media/CREDITS.md) and checked against their SHA-256 sums. You need [uv](https://docs.astral.sh/uv/), Rust, and about 2 GB for benchmark files, plus space for Rust builds. Choose a working directory:
 
 ```sh
 BENCH_DIR=$(mktemp -d)
 ```
 
 ```sh
-cargo install ssimulacra2_rs --no-default-features
+cargo install ssimulacra2_rs --version 0.5.2 --locked --no-default-features
 cargo build --release
 cargo build --release --example raw_reference
 uv run docs/media/benchmark.py "$BENCH_DIR" --avify target/release/avify --raw-reference target/release/examples/raw_reference --json docs/media/results.json

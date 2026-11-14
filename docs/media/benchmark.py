@@ -6,11 +6,13 @@
 import argparse
 import hashlib
 import json
+import shlex
 import shutil
 import subprocess
 import time
 import urllib.request
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import rawpy
@@ -98,45 +100,59 @@ def measure(args: argparse.Namespace, photos: Path, quality: int) -> dict:
 		shutil.rmtree(outdir)
 	flags = ['--keep', '--quiet', '--quality', str(quality), '--speed', str(args.speed)]
 	started = time.monotonic()
-	encoded = subprocess.run(
-		[args.avify, *flags, '--outdir', str(outdir), str(photos)], capture_output=True, text=True, check=True
-	)
+	with TemporaryDirectory(prefix='avify-input-', dir=args.workdir) as temporary:
+		inputs = Path(temporary)
+		for sample in SAMPLES:
+			shutil.copyfile(photos / sample['name'], inputs / sample['name'])
+		encoded = subprocess.run(
+			[args.avify, *flags, '--outdir', str(outdir), str(inputs)],
+			capture_output=True,
+			text=True,
+			check=True,
+		)
 	seconds = round(time.monotonic() - started, 2)
 
 	rows = []
 	for sample in SAMPLES:
 		photo = photos / sample['name']
 		avif = outdir / (photo.stem + '.avif')
-		assert avif.exists(), f'avify kept {photo.name} instead of writing {avif.name}'
 		reference = args.workdir / 'reference' / (photo.stem + '.png')
-		decoded = outdir / (photo.stem + '.decoded.png')
-		Image.open(avif).convert('RGB').save(decoded, compress_level=1)
-		a = np.asarray(Image.open(reference))
-		b = np.asarray(Image.open(decoded))
-		assert a.shape == b.shape, f'{reference} {a.shape} vs {decoded} {b.shape}'
+		with Image.open(reference) as original:
+			width, height = original.size
 		row = {
 			'name': sample['name'],
 			'kind': sample['kind'],
-			'width': a.shape[1],
-			'height': a.shape[0],
+			'width': width,
+			'height': height,
 			'input_bytes': photo.stat().st_size,
-			'avif_bytes': avif.stat().st_size,
-			'ssimulacra2': ssimulacra2(args.ssimulacra2, reference, decoded),
-			'ssim': round(float(structural_similarity(a, b, channel_axis=2)), 3),
+			'avif_bytes': avif.stat().st_size if avif.exists() else None,
+			'ssimulacra2': None,
+			'ssim': None,
 		}
-		row['ratio'] = round(row['input_bytes'] / row['avif_bytes'], 1)
+		if avif.exists():
+			decoded = outdir / (photo.stem + '.decoded.png')
+			Image.open(avif).convert('RGB').save(decoded, compress_level=1)
+			a = np.asarray(Image.open(reference))
+			b = np.asarray(Image.open(decoded))
+			assert a.shape == b.shape, f'{reference} {a.shape} vs {decoded} {b.shape}'
+			row['ssimulacra2'] = ssimulacra2(args.ssimulacra2, reference, decoded)
+			row['ssim'] = round(float(structural_similarity(a, b, channel_axis=2, data_range=255)), 3)
+		row['retained_bytes'] = row['avif_bytes'] or row['input_bytes']
+		row['ratio'] = round(row['input_bytes'] / row['retained_bytes'], 1)
 		rows.append(row)
 	total_input = sum(row['input_bytes'] for row in rows)
-	total_avif = sum(row['avif_bytes'] for row in rows)
+	total_avif = sum(row['avif_bytes'] or 0 for row in rows)
+	total_retained = sum(row['retained_bytes'] for row in rows)
 	return {
 		'quality': quality,
 		'speed': args.speed,
-		'command': f'avify {" ".join(flags)} --outdir OUTPUT_DIR PHOTO_DIR',
+		'command': shlex.join(encoded.args),
 		'seconds': seconds,
 		'summary': encoded.stderr.strip(),
 		'total_input_bytes': total_input,
 		'total_avif_bytes': total_avif,
-		'total_ratio': round(total_input / total_avif, 1),
+		'total_retained_bytes': total_retained,
+		'total_ratio': round(total_input / total_retained, 1),
 		'rows': rows,
 	}
 
@@ -144,12 +160,15 @@ def measure(args: argparse.Namespace, photos: Path, quality: int) -> dict:
 def report(run: dict) -> None:
 	print(run['command'])
 	for row in run['rows']:
+		if row['avif_bytes'] is None:
+			print(f'  {row["kind"]:<5} {row["input_bytes"]:>12,} bytes kept (larger AVIF discarded)')
+			continue
 		print(
 			f'  {row["kind"]:<5} {row["input_bytes"]:>12,} -> {row["avif_bytes"]:>10,} bytes '
 			f'{row["ratio"]:>5}x  SSIMULACRA2 {row["ssimulacra2"]:>5}  SSIM {row["ssim"]}'
 		)
 	print(
-		f'  folder {run["total_input_bytes"]:>11,} -> {run["total_avif_bytes"]:>10,} bytes '
+		f'  folder {run["total_input_bytes"]:>11,} -> {run["total_retained_bytes"]:>10,} retained bytes '
 		f'{run["total_ratio"]:>5}x  in {run["seconds"]} s'
 	)
 
@@ -160,7 +179,7 @@ def main() -> None:
 	parser.add_argument('--avify', default='avify')
 	parser.add_argument('--raw-reference', required=True, help='path to the raw_reference example binary')
 	parser.add_argument('--ssimulacra2', default='ssimulacra2_rs')
-	parser.add_argument('--quality', type=int, nargs='+', default=[80, 90, 95])
+	parser.add_argument('--quality', type=int, nargs='+', default=[80, 90, 95, 97, 98])
 	parser.add_argument('--speed', type=int, default=10)
 	parser.add_argument('--json', type=Path, help='write results here')
 	args = parser.parse_args()
